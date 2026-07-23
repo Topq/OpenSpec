@@ -1,0 +1,903 @@
+version: 1
+name: lr-func-dev
+description: 灵刃功能开发完整流水线：策划案 → 原型验收 → 三端设计 → 实施 → 回写 → 验证 → 归档
+
+artifacts:
+  # ========== 阶段 3：技术提案 ==========
+  - id: proposal
+    generates: proposal.md
+    requires: []
+    description: 技术提案，从策划视角转为技术视角
+    template: proposal.md
+    instruction: |
+      **前置条件检查**：
+      确认以下文件存在（由 lr-design skill 生成）：
+      - changes/<id>/plan/working.md（策划案定稿版）
+      - changes/<id>/demo/*.html（策划验收通过的原型）
+
+      如果文件不存在，报错：
+      ```
+      错误：缺少必要输入文件
+
+      proposal 产物依赖 plan/working.md 和 demo/*.html，但未找到这些文件。
+
+      请先运行 lr-design skill 生成这些文件：
+      /lr-design <id>
+      ```
+
+      **输入文件**：
+      - changes/<id>/plan/working.md（策划案，含对齐循环的决策挂账）
+      - changes/<id>/demo/*.html（交互原型）
+
+      **文档结构**（沿用四段结构，不增删标题）：
+      ```markdown
+      ## Why
+      ## What Changes
+      ## Capabilities
+      ### New Capabilities
+      ### Modified Capabilities
+      ## Impact
+      ## 决策记录
+      ```
+
+      **各段规则**：
+      - **Why**：从 working.md 的立项动机提炼，2~4 句。写玩法目标和玩家价值，不写实现。
+      - **What Changes**：按玩家可感知的变化列条目。
+      - **Capabilities**：按业务能力划分，禁止按客户端/服务端/配置/QA 分层。
+        每个 New Capability 对应一个 specs/<name>/spec.md。
+        只有当 openspec/specs/ 下已存在同名能力且本次改其行为时才填 Modified。
+      - **Impact**：必须分别写明客户端 / 服务端 / 策划配置三端各自受影响的区域，
+        以及本次明确不涉及的区域（按 config.yaml 的项目规则标注）。
+      - **决策记录**：从 working.md 里策划对齐循环和假设清单裁决中拍板的每一条沉淀进来：
+        ```markdown
+        | # | 问题 | 决定 | 理由 |
+        |---|------|------|------|
+        | 1 | ... | ... | ... |
+        ```
+        只记"策划必须决定"的项；工程实现问题不进这张表。
+
+      **从 demo 提取的补充信息**（用于丰富 Impact/Capabilities 的描述，不单独成段）：
+      - Page/Panel 清单（统计 data-lr-component="surface.page"/"surface.panel"）
+      - 数据字段清单（统计 data-lr-bind）
+      - 用户操作清单（统计 data-lr-action）
+
+  # ========== 阶段 4：增量规范 ==========
+  - id: specs
+    generates: specs/**/*.md
+    requires: [proposal]
+    description: 验收场景，按 capability 分目录的增量规范
+    template: specs/capability-template/spec.md
+    instruction: |
+      **输入文件**：
+      - changes/<id>/proposal.md（技术提案，含 Capabilities 划分）
+      - changes/<id>/plan/working.md（策划案定稿版，提取用户场景）
+      - changes/<id>/demo/*.html（交互原型，补充异常/边界场景）
+
+      **判断 ADDED 还是 MODIFIED**：
+      - openspec/specs/ 下没有这个能力的既有 spec（多数情况）→ 一律 ## ADDED Requirements
+      - 有既有 spec 且本次改变其行为 → ## MODIFIED Requirements，写修改后的完整 requirement 全文，不是只写差异
+
+      **格式**（硬性约束，validate 会查）：
+      ```markdown
+      ## ADDED Requirements
+
+      ### Requirement: <行为名>
+      <一句 SHALL 陈述>
+
+      #### Scenario: <场景名>
+      - **GIVEN** <前置条件>
+      - **AND** <补充前置条件>
+      - **WHEN** <触发条件或玩家操作>
+      - **THEN** <可观察的结果>
+      - **AND** <补充结果>
+      ```
+      - Requirement 正文必须含 SHALL
+      - 每个 Requirement 至少一个 Scenario
+      - WHEN/THEN 必须存在；GIVEN 用于前置条件，AND 补充同类行
+      - 沿用 `-` 加粗列表写法，不使用独立的"前置条件/操作步骤/预期结果"分段
+
+      **内容边界**（只写行为层，可观察、可测试、可验收）：
+      - 数值不进 spec，规则进（"档位 6/30/68 元"不进；"按配置表档位购买"进）
+      - 策划案里的奖励表、档位表引用一句"见策划配置 XXX 表"，不抄内容
+      - 视觉方向、布局、动效、文案措辞不进（留在 plan/working.md 和 demo 里）
+      - 协议字段、存储结构、类名、红点实现方式不进；红点何时出现/消失是行为，进；怎么实现，不进
+
+      **场景覆盖**：每个 Requirement 对照检查正常流、失败流（条件不足、货币不足）、
+      边界（等级临界、活动结束瞬间）、异常（断线重连后的状态）。
+
+      **目录结构**：
+      每个 capability 一个目录，目录名用 kebab-case：
+      specs/
+      └── {capability-name}/
+          └── spec.md
+
+  # ========== 阶段 5：三端详细设计 ==========
+  - id: design-config
+    generates: design/config.md
+    requires: [specs]
+    description: 配置表详细设计
+    template: design/config.md
+    instruction: |
+      **第 0 步：代码库调查（Pre-flight Check）**
+
+      在生成 design 文档前，先调查配置表现有实现，避免基于错误假设设计。
+
+      搜索范围：
+      - `../design/table/default_ios/` - 策划配置表目录
+      - `Assets/Script/LogicModule/*/XXXDefine.cs` - 客户端配置结构体定义
+      - `FsGame/*/XXXDefine.h` - 服务端配置结构体定义
+
+      执行以下检查（直接搜索代码，不向用户提问）：
+
+      1. **配置表是否已存在**
+         - 搜索 `.xlsx` 文件名（如 `growth_fund_main.xlsx`）
+         - 若存在 → 记录现有字段列表，在 design/config.md 中标注"扩展现有表"而非"新增表"
+
+      2. **字段是否已由代码固定**
+         - 搜索客户端/服务端的配置结构体定义（如 `struct CGrowthFundConfig`）
+         - 若字段已硬编码 → 在 design/config.md 中明确标注"字段由代码固定，不可自由调整"
+         - 逐字段对照 proposal，列出差异（proposal 要求但代码没有的字段、代码有但 proposal 未提的字段）
+
+      3. **导出机制是否特殊**
+         - 检查是否有自定义导出脚本（非标准 Excel → txt 流程）
+         - 若存在 → 记录到"配置表生成和使用机制"章节
+
+      **调查结果必须体现在 design/config.md 的以下位置**：
+      - `## ⚠️ 当前状态` 章节（若发现字段由代码固定或与 proposal 假设冲突）
+      - `## 背景与目标` 的"当前状态"段落（简要说明是新增表还是扩展表）
+      - `## 设计阶段配置表变更` 章节（区分"新增表"vs"扩展表"vs"补充字段"）
+
+      ---
+
+      **规则文件**：
+      schemas/lr-func-dev/rules/design/config-structure.md
+
+      请完整阅读该规则文件，按其定义的结构生成 design/config.md。
+
+      **输入文件**：
+      - changes/<id>/specs/**/*.md（验收场景）
+      - changes/<id>/proposal.md（业务背景）
+
+      **生成要求**：
+      1. 按 config-structure.md 定义的章节结构组织内容
+      2. 必须包含"设计阶段配置表变更"章节（新增表、补充字段、关联变更）
+      3. 必须包含"配置表生成和使用机制"章节（策划/服务器/客户端三端流程）
+      4. 每个配置表必须列出完整字段定义
+      5. 未确认的字段类型、枚举值、默认值必须列入 ## Open Questions 章节
+
+      **Open Questions 格式**：
+      ### Q: [问题描述]
+      **Answer**: [留空，等待评审填写]
+
+  - id: design-server
+    generates: design/server.md
+    requires: [specs]
+    description: 服务端详细设计
+    template: design/server.md
+    instruction: |
+      **第 0 步：代码库调查（Pre-flight Check）**
+
+      在生成 design 文档前，先调查服务端现有实现，避免基于错误假设设计。
+
+      搜索范围：
+      - `FsGame/ActivityModule/` - 活动业务模块
+      - `FsGame/*/` - 其他业务模块
+      - `define/` - 协议定义、错误码定义
+
+      执行以下检查（直接搜索代码，不向用户提问）：
+
+      1. **功能是否已有历史实现**
+         - 搜索关键词：proposal 中的功能名称、核心实体名、Record 表名
+         - 若发现完整实现且激活状态 → 在 design/server.md 开头加 `## ⚠️ 当前状态` 章节说明"这是审查现有实现，非设计新系统"
+         - 若发现历史残留代码 → 记录到 Context 章节，说明是否复用
+
+      2. **Record 表是否已定义**
+         - 搜索 `#define XXX_REC` 表名宏
+         - 若存在 → 记录现有列定义、持久化属性，在 design/server.md 中标注"扩展现有表"或"复用现有表"
+
+      3. **协议是否已定义**
+         - 搜索 `define/` 下相关协议号和消息定义
+         - 若存在 → 记录现有协议字段，在 design/server.md 中标注"扩展现有协议"或"复用现有协议"
+
+      **调查结果必须体现在 design/server.md 的以下位置**：
+      - `## ⚠️ 当前状态` 章节（若发现与 proposal 假设冲突的既有实现）
+      - `## 背景与目标` 的"当前状态"段落（简要说明是新增还是修改）
+      - `## 模块定义` 的文件路径（使用实际发现的路径，而非猜测）
+
+      ---
+
+      **规则文件**：
+      schemas/lr-func-dev/rules/design/server-structure.md
+
+      请完整阅读该规则文件，按其定义的结构生成 design/server.md。
+
+      **输入文件**：
+      - changes/<id>/specs/**/*.md（验收场景）
+      - changes/<id>/proposal.md（业务背景）
+
+      **生成要求**：
+      1. 按 server-structure.md 定义的章节结构组织内容
+      2. 模块定义（模块名、文件路径、依赖模块）
+      3. Record 表定义（表名宏、列定义、访问方式）必须与客户端完全对齐
+      4. 配置表定义（完整字段、配置结构体、加载流程）
+      5. 协议定义（消息号、字段、处理流程）
+      6. 业务逻辑流程（状态机、校验规则、奖励发放）
+      7. 未确认的存储字段、错误码、校验规则必须列入 ## Open Questions 章节
+
+      **Open Questions 格式**：
+      ### Q: [问题描述]
+      **Answer**: [留空，等待评审填写]
+
+  - id: design-client
+    generates: design/client.md
+    requires: [specs]
+    description: 客户端详细设计
+    template: design/client.md
+    instruction: |
+      **第 0 步：代码库调查（Pre-flight Check）**
+
+      在生成 design 文档前，先调查客户端现有实现，避免基于错误假设设计。
+
+      搜索范围：
+      - `Assets/Script/LogicModule/` - 业务逻辑模块
+      - `Assets/Script/UIScript/` - UI Panel/Page
+      - `BusinessActivityDefine.cs` - 活动框架功能 ID
+
+      执行以下检查（直接搜索代码，不向用户提问）：
+
+      1. **功能是否已有历史实现**
+         - 搜索关键词：proposal 中的功能名称、核心实体名、specs 中的专有名词
+         - 若发现完整实现且激活状态 → 在 design/client.md 开头加 `## ⚠️ 当前状态` 章节说明"这是审查现有实现，非设计新系统"
+         - 若发现历史残留代码（已废弃/注释掉）→ 记录到 Context 章节，说明是否复用
+
+      2. **是否需要接入 BusinessActivityModule**
+         - 检查 `BusinessActivityDefine.cs` 是否有相关功能 ID 枚举值
+         - 若存在 → 必须复用现有活动框架（Panel 管理、红点系统、时间配置），不设计独立体系
+         - 在 design/client.md 的"依赖模块"章节明确标注 `BusinessActivityModule（必须接入）`
+
+      3. **UI 组件是否已有实现**
+         - 搜索 `Assets/Script/UIScript/` 下是否有相关 Panel
+         - 若存在 → 记录现有文件路径、成员变量、状态机，在 design/client.md 中标注"修改现有"而非"新建"
+
+      **调查结果必须体现在 design/client.md 的以下位置**：
+      - `## ⚠️ 当前状态` 章节（若发现与 proposal 假设冲突的既有实现）
+      - `## 背景与目标` 的"当前状态"段落（简要说明是新增还是修改）
+      - `## 模块定义` 的文件路径（使用实际发现的路径，而非猜测）
+
+      ---
+
+      **规则文件**：
+      schemas/lr-func-dev/rules/design/client-structure.md
+
+      请完整阅读该规则文件，按其定义的结构生成 design/client.md。
+
+      **输入文件**：
+      - changes/<id>/specs/**/*.md（验收场景）
+      - changes/<id>/demo/*.html（Web 原型）
+      - changes/<id>/proposal.md（业务背景）
+
+      **从 demo 提取结构信息**（语义 ID 见 .claude/skills/lr-design/references/unity-ui-components.md 白名单)：
+      1. 扫描所有 data-lr-component="surface.page"/"surface.panel"，列出 Page/Panel 清单
+      2. 对每个 Page/Panel，提取其下的 data-lr-bind 字段，作为成员变量清单
+         示例：data-lr-bind="title" → m_TxtTitle: Text
+      3. 对每个 Page/Panel，提取其下的 data-lr-action，作为方法签名清单
+         示例：data-lr-action="onClaimClick" → void OnClaimClick(int fundId)
+
+      **生成要求**：
+      1. 按 client-structure.md 定义的章节结构组织内容
+      2. 模块定义（模块名、文件路径、UI 文件组织、功能 ID 分配）
+      3. Record 表定义（表名常量、列定义、访问方式）必须与服务端完全对齐
+      4. 协议定义（消息号、字段、调用时机）
+      5. UI Panel 结构（从 demo 提取成员变量和方法签名）
+      6. 状态机定义（状态 → 事件 → 新状态）
+      7. 交互流程（用户操作 → 协议调用 → UI 刷新）
+      8. 未确认的协议字段、UI 交互细节、状态转移条件必须列入 ## Open Questions 章节
+
+      **Open Questions 格式**：
+      ### Q: [问题描述]
+      **Answer**: [留空，等待评审填写]
+
+  # ========== 阶段 6：设计合并门禁 ==========
+  - id: design
+    generates: design.md
+    requires: [design-client, design-server, design-config]
+    description: 合并后的完整设计文档，含 Open Questions 硬性检查
+    template: design.md
+    instruction: |
+      **第一步：Open Questions 检查（阻断性）**
+      读取 design/client.md、design/server.md、design/config.md。
+      检查每个文件的 `## Open Questions` 顶层章节：
+      1. 章节必须存在
+      2. 章节下不得有任何 `### Q:` 子章节，或所有 Q 的 **Answer** 字段必须非空
+
+      **回答质量检查**（对非空的 Answer 字段执行）：
+      1. **禁止模糊词汇**（阻断性）
+         - 不合格词汇："看情况""暂时这样""应该可以""先按现在的做""待定""后续再说"
+         - 若发现模糊词汇 → 阻断，要求重新回答
+
+      2. **技术问题必须包含类型定义**（阻断性）
+         - 涉及字段/参数/配置的问题，回答必须包含类型和格式
+         - 不合格："需要这个字段"（缺少类型）
+         - 合格："int, 0=不显示 1=显示"
+         - 若缺少类型定义 → 阻断，要求补充类型
+
+      3. **业务逻辑问题必须包含具体处理策略**（阻断性）
+         - 不合格："按常规处理"（什么是常规？）
+         - 合格："活动结束后，已购买未领取的奖励发邮件补发，有效期 30 天"
+         - 若缺少具体策略 → 阻断，要求明确处理方式
+
+      如果任一文件的 Open Questions 未全部解决或回答质量不合格：
+      - 输出错误报告：
+        ```
+        ❌ design 合并门禁未通过
+
+        以下文件的 Open Questions 尚未全部解决或回答质量不合格：
+
+        design/client.md:
+          - Q: UI 刷新是立即还是等下一帧？
+            → 未回答
+          - Q: FreeHighlight 字段格式？
+            → 回答质量不合格：缺少类型定义（仅回答"需要这个字段"）
+
+        design/server.md:
+          - Q: 奖励发放的事务边界是什么？
+            → 回答质量不合格：包含模糊词汇"看情况"
+
+        请回到技术评审，针对这些问题给出明确答案，
+        更新对应的 design/*.md 文件，然后重新运行：
+        openspec instructions design --change <id>
+        ```
+      - 不生成 design.md
+      - 状态标记为 blocked
+
+      **第二步：跨文档对齐检查（阻断性）**
+
+      在 Open Questions 检查通过后，执行跨文档对齐检查：
+
+      1. **Record 表对齐**
+         - 提取 design/client.md 和 design/server.md 中所有 Record 表定义
+         - 检查每个表的：表名、列名、列顺序、数据类型
+         - 若不一致 → 阻断并报告差异：
+           ```
+           ❌ Record 表定义不一致
+
+           表 GROWTH_FUND_PURCHASE_REC:
+             - 客户端列顺序: ActivityID, PurchaseTime
+             - 服务端列顺序: ActivityID, ChargeId
+             → 列不一致，客户端有 PurchaseTime，服务端有 ChargeId
+           ```
+
+      2. **协议对齐**
+         - 提取 design/client.md 和 design/server.md 中所有协议定义
+         - 检查每个协议的：协议号占位符、参数列表、参数顺序、数据类型
+         - 若不一致 → 阻断并报告差异：
+           ```
+           ❌ 协议定义不一致
+
+           协议 C2S_GROWTH_FUND_PURCHASE:
+             - 客户端参数: (int activity_id)
+             - 服务端参数: (int activity_id, int charge_id)
+             → 参数数量不一致
+           ```
+
+      3. **配置表对齐**
+         - 提取三端文档中引用的所有配置表名称和字段
+         - 检查表名、字段名、字段类型是否一致
+         - 若不一致 → 阻断并报告差异：
+           ```
+           ❌ 配置表定义不一致
+
+           表 growth_fund_main.xlsx:
+             - design/config.md 定义字段: ActiveId(int), ChargeId(int)
+             - design/server.md 引用字段: ActivityId(int), ChargeId(int)
+             → 字段名不一致：ActiveId vs ActivityId
+           ```
+
+      若对齐检查失败：
+      - 输出上述错误报告
+      - 不生成 design.md
+      - 要求修正三端文档后重新运行
+
+      **第三步：合并（仅在所有检查通过后执行）**
+      按以下结构生成 design.md：
+
+      # Design: [变更名]
+
+      ## Context
+      [从三份设计提取共识部分：业务背景、用户场景]
+
+      ## Goals
+      [技术目标：客户端要实现什么、服务端要实现什么、配置要支持什么]
+
+      ## Decisions
+      [关键技术决策：协议设计、状态管理、存储方案、配置结构]
+
+      ## Risks
+      [风险点：性能、兼容性、数据一致性]
+
+      ## Open Questions
+      [必须为空，或仅保留一行 "无" 或 "None"]
+
+      ---
+
+      ## 附录 A：客户端详细设计
+      [完整粘贴 design/client.md，但移除其 Open Questions 章节]
+
+      ## 附录 B：服务端详细设计
+      [完整粘贴 design/server.md，但移除其 Open Questions 章节]
+
+      ## 附录 C：配置表详细设计
+      [完整粘贴 design/config.md，但移除其 Open Questions 章节]
+
+  # ========== 阶段 7：验收用例生成 ==========
+  - id: test-cases
+    generates: test-cases.md
+    requires: [design, specs]
+    description: 验收测试用例，带稳定编号，供 tasks 引用
+    template: test-cases.md
+    instruction: |
+      读取 specs/**/*.md 和 design.md，生成验收用例。
+
+      **编号规则**（硬性约束）：
+      - 格式：TC-{spec目录名}-{两位序号}
+      - 同一 spec 目录下序号从 01 递增
+      - 编号一旦生成不得重排（新增用例接着往后编号）
+
+      **每条用例结构**：
+      ### TC-{spec目录名}-01：{Scenario 标题}
+
+      - **前置条件**：[从 GIVEN 提取]
+      - **操作步骤**：[从 WHEN 提取]
+      - **预期结果**：[从 THEN 提取]
+      - **验证点**：[从 design.md 提取技术细节]
+        - 验证协议号 XXX，返回码 YYY
+        - 验证 GROWTH_FUND_OPEN_REC 新增一行
+        - 验证客户端状态机进入 Claimed 状态
+      - **来源**：specs/{目录}/spec.md - {Requirement 标题} - {Scenario 标题}
+
+      **完整性自检**（仅警告，不阻断）：
+      - 遍历 specs 的所有 Scenario
+      - 确认每个 Scenario 至少对应一条测试用例
+      - 缺失的输出警告清单：
+        ```
+        ⚠️ test-cases.md 完整性检查
+
+        以下 specs 场景未在 test-cases.md 中找到对应测试用例：
+          - specs/growth-fund-claim/spec.md - 领取奖励 - 首次领取免费奖励
+          - ...
+
+        说明：某些场景可能是纯技术实现细节，不一定需要独立测试用例。
+              请人工评审时确认这些缺失是否合理。
+        ```
+      - 但仍生成 test-cases.md（警告不阻断）
+
+  # ========== 阶段 8：实现任务生成 ==========
+  - id: tasks
+    generates: tasks.md
+    requires: [design, test-cases]
+    description: 实现任务清单，引用 test-cases 编号，分部门开发
+    template: tasks.md
+    instruction: |
+      **规则文件**：
+      schemas/lr-func-dev/rules/tasks/client-implementation.md
+      schemas/lr-func-dev/rules/tasks/server-implementation.md
+      schemas/lr-func-dev/rules/tasks/config-implementation.md
+
+      请完整阅读这些规则文件，生成任务时参考其中的代码模板和实现细节。
+
+      **输入文件**：
+      - changes/<id>/design.md（技术方案，含三端详细设计附录）
+      - changes/<id>/test-cases.md（验收用例，带 TC 编号）
+      - changes/<id>/specs/**/*.md（验收场景）
+
+      **格式要求**（OpenSpec 硬性约束）：
+      - Checkbox 格式：`- [ ] N.M [分类标签] 任务描述`
+      - 分类标签固定五种：[Contract]、[Config]、[Server]、[Client]、[Integration]
+      - [Integration] 任务组必须排在最后
+
+      **任务组划分规则**（支持分部门并行开发）：
+
+      ### 1. [Contract] 组（前后端公共依赖）
+      - 协议号分配：REQ_XXX = 值，RES_XXX = 值
+      - 协议字段定义：message ReqXxx { ... }
+      - 错误码定义：XXX_ERR_CODE = 值
+      - 依赖：无（最先开始）
+      - 负责人：技术负责人或前后端共同确认
+
+      ### 2. [Config] 组（策划配置依赖）
+
+      **⚠️ 标签规则**：
+      - [Config] 标签**只用于策划执行的任务**（填写配置表、配置数据录入）
+      - 客户端生成配置表代码 → 使用 [Client] 标签
+      - 服务端验证配置加载逻辑 → 使用 [Server] 标签
+
+      **[Config] 任务示例**：
+      - [ ] 2.1 [Config] 策划填写 active_fund_main.txt 配置表
+      - [ ] 2.2 [Config] 策划填写 activity_mix_growthfund_reward.txt 配置表
+
+      **客户端配置表代码生成**（使用 [Client] 标签，放在 Config Tasks 章节）：
+      - [ ] 2.x [Client] 客户端生成配置表 C# 代码并注册到 TableConfig
+
+      **服务端配置表验证**（使用 [Server] 标签，放在 Config Tasks 章节）：
+      - [ ] 2.y [Server] 服务端验证现有 XXXModule 配置加载逻辑
+
+      - 依赖：无（与 Contract 并行）
+      - 负责人：策划（填表）+ 前端（生成代码）+ 后端（验证加载）
+      - 参考：design.md 附录 C 的配置表定义
+      - 实现细节：rules/tasks/config-implementation.md
+
+      ### 3. [Server] 组（后端实现）
+      按模块划分子组（如"3.1 存储层"、"3.2 业务逻辑"、"3.3 协议处理"）
+
+      **任务模板示例**（使用 implementation 规则的代码参考）：
+      - [ ] 3.1 [Server] 新增 {TABLE_NAME}_REC 表
+        目标路径：FsGame/XXXModule/XXX/XXXDefine.h
+        实现细节：
+          - 定义表名宏：#define {TABLE_NAME}_REC "table_name_rec"
+          - 定义列枚举（按 design.md 附录 B 的 Record 表定义）
+          - 参考：rules/tasks/server-implementation.md 的 Record 表定义模板
+        对应验收：TC-xxx-01
+
+      - [ ] 3.2 [Server] 实现配置表加载
+        目标路径：FsGame/XXXModule/XXX/XXXModule.cpp
+        实现细节：
+          - 使用 READ_FILE 宏读取配置（参考 rules/tasks/server-implementation.md）
+          - 字段名必须与 Excel 列名完全一致
+          - 使用 LogicAssert 检查主键不重复
+        对应验收：TC-xxx-02
+
+      依赖：[Contract] + [Config] 完成后才能开始
+      负责人：后端
+      验证任务必须标注 `对应验收：TC-xxx`
+
+      ### 4. [Client] 组（前端实现）
+      按 Panel/Page 划分子组
+
+      **UI 相关的 [Client] 任务**（固定三条）：
+      - [ ] N.1 [Client] 生成 {XxxPanel}.cs 骨架
+        目标路径：Assets/Script/UIScript/{XxxPanel}/{XxxPanel}.cs
+        依据：design.md 附录 A + demo/*.html 的 data-lr-* 标注
+        实现细节：
+          - 按命名约定生成成员变量声明（data-lr-bind="title" → m_TxtTitle: Text）
+          - 生成空方法签名（data-lr-action="onClaimClick" → void OnClaimClick()）
+          - 参考：rules/tasks/client-implementation.md 的骨架模板
+
+      - [ ] N.2 [Client] 实现 {XxxPanel} 状态机与交互逻辑
+        目标路径：Assets/Script/UIScript/{XxxPanel}/{XxxPanel}.cs
+        依据：design.md 附录 A 的"状态机"和"交互流程"章节
+        实现细节：
+          - 参考：rules/tasks/client-implementation.md 的状态机实现模板
+        对应验收：TC-xxx-01, TC-xxx-03
+
+      - [ ] N.3 [Client] 实现 {XxxPanel} 协议收发
+        目标路径：Assets/Script/UIScript/{XxxPanel}/{XxxPanel}.cs
+        依据：design.md 附录 A 的"协议定义"章节
+        实现细节：
+          - 参考：rules/tasks/client-implementation.md 的协议收发模板
+        对应验收：TC-xxx-02
+
+      **模块相关的 [Client] 任务示例**：
+      - [ ] M.1 [Client] 生成 {XXX}Module.cs 骨架
+        目标路径：Assets/Script/LogicModule/{XXX}Module/{XXX}Module.cs
+        实现细节：
+          - 实现 ILogicModule 接口
+          - OnInit() 中注册事件监听和协议回调
+          - 参考：rules/tasks/client-implementation.md 的模块初始化模板
+
+      - [ ] M.2 [Client] 实现红点逻辑
+        目标路径：Assets/Script/LogicModule/{XXX}Module/{XXX}Module_RedPoint.cs
+        实现细节：
+          - RegisterRedPoint() 绑定父子红点
+          - 实现红点计算函数
+          - 参考：rules/tasks/client-implementation.md 的红点注册模板
+        对应验收：TC-xxx-04
+
+      依赖：[Contract] 完成后才能开始（不依赖 Server 实现完成）
+      负责人：前端
+      验证任务必须标注 `对应验收：TC-xxx`
+
+      ### 5. [Integration] 组（跨端联调）
+      - 前后端联调验证
+      - 异常流程测试（网络中断、超时、错误码）
+      - 依赖：[Server] + [Client] 全部完成
+      - 负责人：前后端 + QA
+      - 必须标注 `对应验收：TC-xxx`（引用集成测试用例）
+
+      **分部门并行开发的依赖图**：
+      ```
+      [Contract] ──┬──> [Server] ──┐
+                   │                ├──> [Integration]
+      [Config] ────┤                │
+                   │                │
+                   └──> [Client] ──┘
+      ```
+
+      **"对应验收"字段约束**（安全边界对齐）：
+      - 骨架任务（如"生成 XxxPanel.cs 骨架"）不强制要求
+      - 状态机、协议、业务逻辑任务必须标注 `对应验收：TC-xxx`
+      - 引用的 TC 编号必须在 test-cases.md 里存在
+
+      **任务拆分粒度规则**：
+
+      1. **UI Panel 任务固定拆成三条**（不拆更细）：
+         - 骨架生成（成员变量 + 空方法签名）
+         - 状态机与交互逻辑
+         - 协议收发与验证
+         不要拆成"每个方法一条任务"或"每个成员变量一条任务"
+
+      2. **模块任务按功能聚合**：
+         - 一个模块的初始化 + 事件注册 + 红点逻辑 = 1-3 条任务
+         - 不要拆成"每个方法一条任务"
+
+      3. **服务端任务按业务流程聚合**：
+         - 一个协议的处理流程（校验 + 写表 + 推送）= 1 条任务
+         - 一个 Record 表的定义 + 访问封装 = 1 条任务
+
+      4. **配置表任务按表聚合**：
+         - 一个配置表的所有字段定义 + 导出脚本 = 1 条任务
+
+      **明确禁止出现的任务类型**（不做的事）：
+
+      ❌ **禁止生成 Unity 编辑器操作任务**：
+      - 不得出现"生成 Prefab""创建 GameObject""绑定字段到 Prefab"类任务
+      - 理由：Prefab 生成是 `openspec apply` 完成后由另一个独立 skill 处理，不属于 OpenSpec 原生结构
+
+      ❌ **禁止生成 UI 样式/布局任务**：
+      - 不得出现"设计 UI 样式""调整布局""确定锚点/位置"类任务
+      - 理由：样式和布局已在策划验收 Web Demo 阶段定案，tasks 阶段只消费已确定的语义标注（组件类型、绑定意图）
+
+      ❌ **禁止生成"待定""占位""后续补充"类任务**：
+      - 每条任务必须有明确的目标路径、实现细节、验收标准
+      - 不合格示例："- [ ] 1.X [Client] 实现其他 UI 交互（待定）"
+
+      **引用有效性自检**（警告不阻断）：
+      遍历所有 `对应验收：TC-xxx` 字段，检查编号是否存在，缺失的输出警告清单：
+      ```
+      ⚠️ tasks ↔ test-cases 引用检查
+
+      以下 tasks 引用了不存在的测试用例编号：
+        - 任务 3.2 引用 TC-growth-fund-05（test-cases 里不存在）
+        - 任务 4.1 引用 TC-growth-fund-09（test-cases 里不存在）
+
+      说明：通常是生成过程中的笔误，请修正 tasks.md 或补充 test-cases.md。
+      ```
+      但仍生成 tasks.md（警告不阻断）
+
+# ========== 实施阶段 ==========
+apply:
+  requires: [tasks]
+  tracks: tasks.md
+  description: 按任务清单实施，实施前再次确认引用有效性
+  instruction: |
+    **apply 范围说明**：
+    - apply 负责生成代码文件（.cs/.cpp/.h/.proto/.xlsx）
+    - apply 不负责生成 Unity Prefab（那是 apply 完成后由独立 skill `lr-unity-prefab-gen` 处理）
+    - Prefab 生成需要对着真实 .cs 文件校验，而非设计意图，因此必须在代码稳定后执行
+
+    ---
+
+    **前置检查**（apply 开始前）：
+    1. 重新检查 tasks.md ↔ test-cases.md 引用有效性
+       （防止 tasks 生成后、apply 前有人手动改了 test-cases）
+    2. 如果有警告，提示用户确认是否继续
+
+    ---
+
+    **实施流程**：
+
+    读取 tasks.md 的所有未完成 checkbox，按分类标签顺序实施：
+    1. [Contract] - 协议定义和协议号分配
+    2. [Config] - 配置表字段定义和导出脚本
+    3. [Server] - 服务端模块、Record 表、协议处理
+    4. [Client] - 客户端模块、UI Panel、协议收发
+    5. [Integration] - 跨端联调（不生成代码，纯验证）
+
+    每完成一条任务，勾选对应 checkbox。
+
+    ---
+
+    **分类执行规则**：
+
+    ### [Contract] 协议定义
+
+    **输入**：
+    - design.md 附录 A（客户端协议定义）和附录 B（服务端协议定义）
+    - 现有协议文件（获取已分配的最大协议号）
+
+    **执行逻辑**：
+    1. **协议号分配**（自动分配机制）
+       - 读取现有协议文件，找到当前最大协议号（如 `C2S_XXX = 1234`）
+       - 为 design.md 中所有 `{待分配}` 占位符按顺序分配新协议号（最大号+1, +2, ...）
+       - 生成协议定义文件（.proto 或项目约定格式）
+
+    2. **消息结构定义**
+       - 按 design.md 的参数列表定义消息体
+       - 客户端和服务端的消息定义必须完全一致（已在 design 阶段对齐检查过）
+
+    **输出**：
+    - 协议定义文件（如 `define/growth_fund_proto.h` 或 `.proto` 文件）
+    - 更新协议号枚举文件
+
+    **验证**：
+    - 协议号无冲突
+    - 消息结构符合命名约定
+
+    ---
+
+    ### [Config] 配置表定义
+
+    **输入**：
+    - design.md 附录 C（配置表详细设计）
+    - 现有配置表目录（`../design/table/default_ios/`）
+
+    **执行逻辑**：
+    1. **Excel 配置表生成**
+       - 按 design/config.md 的字段定义创建 .xlsx 文件
+       - 第一行：字段名（如 `ActiveId`、`ChargeId`）
+       - 第二行：字段类型注释（如 `int`、`string`）
+       - 第三行起：示例数据（从 design.md 提取）
+
+    2. **配置结构体定义**（可选，取决于项目约定）
+       - 客户端：生成 `XXXDefine.cs`（如 `CGrowthFundConfig`）
+       - 服务端：生成 `XXXDefine.h`（如 `struct CGrowthFundConfig`）
+
+    **输出**：
+    - `../design/table/default_ios/xxx.xlsx`
+    - 配置结构体文件（如有）
+
+    **验证**：
+    - 字段名与 design.md 一致
+    - 字段类型与三端对齐检查的结果一致
+
+    ---
+
+    ### [Server] 服务端实现
+
+    **输入**：
+    - design.md 附录 B（服务端详细设计）
+    - rules/tasks/server-implementation.md（代码模板）
+
+    **执行逻辑**：
+    1. **Record 表定义**
+       - 生成表名宏：`#define XXX_REC "xxx_rec"`
+       - 生成列枚举：`enum EXxxRecCol { COL_ACTIVITY_ID = 0, ... }`
+       - 按 design.md 的持久化属性设置列属性
+
+    2. **模块骨架生成**
+       - 生成模块类文件（如 `FsGame/ActivityModule/GrowthFundModule.cpp`）
+       - 实现初始化函数（OnInit、注册协议回调）
+
+    3. **协议处理流程**
+       - 为每个协议生成处理函数（如 `OnReqGrowthFundPurchase`）
+       - 按 design.md 的校验逻辑、事务边界、奖励发放流程填充代码骨架
+       - 参考 rules/tasks/server-implementation.md 的模板
+
+    **输出**：
+    - 服务端模块文件（.cpp/.h）
+    - Record 表定义文件
+
+    **验证**：
+    - Record 表列定义与客户端对齐
+    - 协议处理函数的参数与协议定义一致
+
+    ---
+
+    ### [Client] 客户端实现
+
+    **输入**：
+    - design.md 附录 A（客户端详细设计）
+    - demo/xxx.html（Web 原型，data-lr-* 标注）
+    - rules/tasks/client-implementation.md（代码模板）
+
+    **执行逻辑**：
+
+    #### 任务类型 1：UI Panel 骨架生成
+
+    **触发条件**：任务描述包含"生成 XXXPanel.cs 骨架"
+
+    **执行步骤**：
+    1. **读取 demo/*.html 提取结构信息**
+       - 找到对应 Panel 的 `data-lr-component="surface.panel"` 节点
+       - 提取所有 `data-lr-bind` → 生成成员变量声明
+         - 示例：`data-lr-bind="title"` + 组件类型 `text` → `private Text m_TxtTitle;`
+       - 提取所有 `data-lr-action` → 生成方法签名
+         - 示例：`data-lr-action="onClaimClick"` → `private void OnClaimClick() { }`
+
+    2. **命名约定**（参考 rules/tasks/client-implementation.md）
+       - Text 组件：`m_TxtXxx`
+       - Button 组件：`m_BtnXxx`
+       - Image 组件：`m_ImgXxx`
+       - GameObject 容器：`m_GoXxx`
+       - 方法名：驼峰式，首字母大写
+
+    3. **生成 .cs 文件**
+       ```csharp
+       using UnityEngine;
+       using UnityEngine.UI;
+
+       public class XXXPanel : MonoBehaviour
+       {
+           // 成员变量（从 demo 提取）
+           private Text m_TxtTitle;
+           private Button m_BtnClaim;
+
+           // 方法签名（从 demo 提取）
+           private void OnClaimClick() { }
+
+           // 生命周期方法（固定骨架）
+           private void Awake() { }
+           private void OnEnable() { }
+           private void OnDisable() { }
+       }
+       ```
+
+    **输出**：
+    - `Assets/Script/UIScript/XXXPanel/XXXPanel.cs`
+
+    **重要说明**：
+    - 骨架生成**不创建 Prefab**，只生成 .cs 代码文件
+    - Prefab 生成由 apply 完成后的独立 skill `lr-unity-prefab-gen` 处理
+    - 独立 skill 会对着真实 .cs 文件的成员变量，逐字段验证并生成 Prefab
+
+    #### 任务类型 2：状态机与交互逻辑实现
+
+    **触发条件**：任务描述包含"实现 XXXPanel 状态机与交互逻辑"
+
+    **执行步骤**：
+    1. 读取 design.md 附录 A 的"状态机"章节
+    2. 实现状态枚举：`enum EPanelState { Closed, Loading, Normal, ... }`
+    3. 实现状态转换逻辑：`SetState(EPanelState newState)`
+    4. 实现交互回调（如 `OnClaimClick` 的具体逻辑）
+
+    **输出**：
+    - 更新已存在的 `XXXPanel.cs`，填充方法实现
+
+    #### 任务类型 3：协议收发实现
+
+    **触发条件**：任务描述包含"实现 XXXPanel 协议收发"
+
+    **执行步骤**：
+    1. 读取 design.md 附录 A 的"协议定义"章节
+    2. 实现协议发送：`SendXxxRequest()`
+    3. 实现协议接收回调：`OnXxxResponse()`
+    4. 实现错误处理：错误码判断、UI 提示
+
+    **输出**：
+    - 更新已存在的 `XXXPanel.cs`，添加协议收发逻辑
+
+    #### 任务类型 4：模块实现
+
+    **触发条件**：任务描述包含"生成 XXXModule.cs"
+
+    **执行步骤**：
+    1. 生成模块骨架（实现 `ILogicModule` 接口）
+    2. 实现 `OnInit()` 方法（注册事件监听、协议回调）
+    3. 实现红点逻辑、数据缓存逻辑
+
+    **输出**：
+    - `Assets/Script/LogicModule/XXXModule/XXXModule.cs`
+
+    ---
+
+    ### [Integration] 跨端联调
+
+    **执行逻辑**：
+    - 不生成代码，纯验证
+    - 启动客户端和服务端，执行 test-cases.md 的验证用例
+    - 验证协议收发、数据同步、异常流程（网络中断、超时、错误码）
+
+    **输出**：
+    - 验证报告（哪些用例通过，哪些失败）
+
+    ---
+
+    **实施时参考文件**：
+    - design.md（权威技术方案）
+    - test-cases.md（验证标准）
+    - 任务的"对应验收"字段（具体要通过哪些测试用例）
+    - rules/tasks/ 下的实现细节文件（代码模板、命名约定）
+
+    **apply 完成后**：
+    - 所有 checkbox 已勾选
+    - 代码文件已写入 `../develop/client/project/` 和 `../develop/server/project/`
+    - 下一步：运行独立 skill `lr-unity-prefab-gen` 生成 Unity Prefab

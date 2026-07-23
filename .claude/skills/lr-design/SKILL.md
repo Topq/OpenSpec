@@ -1,6 +1,6 @@
 ---
 name: lr-design
-description: 灵刃策划案 → OpenSpec 变更(proposal + specs delta + Web 原型 demo)的策划侧闭环流程。只要用户给出飞书策划案链接,或提到"策划案审查""生成原型/demo""建 proposal""提变更""开需求"等意图,即使没有点名 openspec,也应使用本技能。覆盖:下载飞书策划案、完整性审查与对齐、生成带 Unity 组件标识的 Web 原型、策划验收、生成 openspec proposal 与 specs delta 并通过校验。不做 design.md 和 tasks.md(那是开发阶段的事),不回写飞书。
+description: 灵刃策划案 → OpenSpec 变更(proposal + specs delta + Web 原型 demo)的策划侧闭环流程。只要用户给出飞书策划案链接,或提到"策划案审查""生成原型/demo""建 proposal""提变更""开需求"等意图,即使没有点名 openspec,也应使用本技能。覆盖:下载飞书策划案、完整性审查与对齐、生成带 Unity 组件标识的 Web 原型、策划验收,再触发 lr-func-dev schema 的 proposal/specs 产物并通过校验。不做 design.md 和 tasks.md(那是开发阶段的事,由同一 schema 的后续产物接手),不回写飞书。
 ---
 
 # 灵刃策划案 → OpenSpec 变更(策划侧闭环)
@@ -25,7 +25,7 @@ description: 灵刃策划案 → OpenSpec 变更(proposal + specs delta + Web �
 - 不擅自用假设补齐策划规则。demo 制作中确实绕不开的细节缺口,记入**假设清单**并在验收时逐条让策划裁决,不静默拍板。
 - 对每个问题给出明确影响和推荐方案,帮助策划做决定,而不是只报告"缺失"。
 - 明确区分"策划必须决定"和"工程后续处理",不要让策划回答纯技术实现问题。
-- 本技能只产出 proposal、specs delta、demo 三件产物。**不生成 design.md、tasks.md**,即使策划要求也先解释:那两件由开发在技术评审阶段做。
+- 本技能负责 demo、proposal、specs delta 三件产物,其中 proposal 和 specs 通过触发 `lr-func-dev` schema 的 proposal/specs 产物生成(见第 5 步),不是本技能直接写文件。**不生成 design.md、tasks.md**,即使策划要求也先解释:那两件由开发在技术评审阶段通过同一个 schema 的后续产物生成。
 - 变更目录里不留中间业务 JSON、PRD 或版本快照;留档只有 `plan/`(定稿 working.md + 图片)。
 
 ## 沟通规则
@@ -128,13 +128,15 @@ python scripts/workflow.py --url <飞书链接> --name <功能名>
 
 ### 第 5 步:openspec 化
 
-读取 [proposal 与 delta 生成规则](references/proposal-rules.md),执行:
+不再自己写 proposal.md 和 specs delta,而是触发 openspec 根 config.yaml 声明的自定义 schema(`lr-func-dev`)生成:
 
-1. 写 `changes/<id>/proposal.md`:Why / What Changes / Capabilities / Impact(按 openspec 根 config.yaml 的项目规则标注三端影响与不涉及区域)+ 决策记录表。
-2. 写 `changes/<id>/specs/<capability>/spec.md`:把定稿行为转成 Requirement + WHEN/THEN 场景。数值引用配置表不抄表;表现层不进 delta。
-3. 交叉核对:delta 场景逐条对照 demo 行为,不一致按 proposal-rules.md 的三分法处理。
-4. 运行 `openspec validate <id>`,错误清零。
-5. 留档:定稿 working.md 与引用图片复制到 `changes/<id>/plan/`。
+1. 留档:定稿 working.md 与引用图片复制到 `changes/<id>/plan/`(必须先做,proposal 产物读取的是这份留档,不是 tmp 会话目录里的临时文件)。
+2. 生成 proposal:运行 `openspec instructions proposal --change <id>`,按输出的 `<instruction>` 块执行,写 `changes/<id>/proposal.md`。
+3. 生成 specs:运行 `openspec instructions specs --change <id>`,按输出的 `<instruction>` 块执行,写 `changes/<id>/specs/<capability>/spec.md`。
+4. 交叉核对:delta 场景逐条对照 demo 行为,不一致按 [proposal 与 delta 生成规则](references/proposal-rules.md)的三分法处理。
+5. 运行 `openspec validate <id>`,错误清零。
+
+[proposal 与 delta 生成规则](references/proposal-rules.md)仍然是权威规则来源——`openspec instructions` 输出的 `<instruction>` 内容与该文档保持一致,该文档描述"为什么这样写",instruction 输出描述"这次具体写什么"。两者对不上时以 instruction 输出为准(它反映的是 schema 当前版本),并回头检查该文档是否需要同步更新。
 
 **── 闸门 C(轻):策划过目场景清单 + 决策记录,确认无误 ──**
 
@@ -183,7 +185,7 @@ demo 需要而 working.md 没写死的细节(空态文案、失败提示样式�
 
 - 策划案已完整审查,规则无冲突、无缺失,决策有记录。
 - `changes/<id>/` 下有 proposal.md(含决策记录)、specs delta、demo/、plan/ 四件产物。
-- `openspec validate <id>` 通过;`openspec status --change <id>` 显示 proposal 与 specs 完成,design 与 tasks 保持空白(这是预期状态,不要补)。
+- `openspec validate <id>` 通过;`openspec status --change <id>` 显示 proposal 与 specs 完成,design-*/design/test-cases/tasks 保持 blocked(这是预期状态,由后续技术评审阶段的 schema 产物接手,不要在本技能里补)。
 - demo 与 delta 行为一致,validate_demo.py 通过,策划已验收。
 - 假设清单全部裁决,遗留占位项已写入交接摘要。
 - tmp 会话目录已清理,无残留污染下次任务。

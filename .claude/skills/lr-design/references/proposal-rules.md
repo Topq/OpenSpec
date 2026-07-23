@@ -1,5 +1,11 @@
 # openspec 化规则:从定稿 working.md 到 proposal + delta
 
+> **权威性说明**：
+> - 本文档是 `lr-func-dev` schema 中 proposal/specs 产物规则的详细解释版本。
+> - `schemas/lr-func-dev/schema.yaml` 的 instruction 是执行时的权威指令（告诉 AI"这次做什么"）。
+> - 本文档解释"为什么这样做"、边界案例、反例，用于理解设计意图和人工评审。
+> - 如果 schema instruction 与本文档描述不一致，以 schema instruction 为准（它反映当前版本），并同步更新本文档。
+
 本文是 lr-design 第 5 步(openspec 化)的执行规范。输入是闸门 B 之后的定稿 `working.md`、对齐循环的决策挂账、假设清单裁决结果;输出是 `changes/<id>/proposal.md` 和 `changes/<id>/specs/<capability>/spec.md`,以 `openspec validate <id>` 清零为完成标志。
 
 ## 变更名

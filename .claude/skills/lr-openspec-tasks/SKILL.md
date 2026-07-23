@@ -1,268 +1,267 @@
 ---
 name: lr-openspec-tasks
-description: 设计评审阶段完成后，自动触发 lr-openspec-design-merge 合并 design/client.md、design/server.md、design/config.md 为 design.md（含 Open Questions 硬性检查），再读取合并后的 design.md + specs/*.md（可选参考 demo/*.html），并行生成 tasks.md（实现任务清单，供 openspec apply 执行）和 test-cases.md（验收测试用例，人工/QA 使用）。是 lr-openspec-design-merge 之后、openspec apply 之前的衔接环节。
+description: 触发 lr-func-dev schema 的设计合并门禁、验收用例生成、实现任务生成。极简触发器，所有逻辑在 schema.yaml 中。
 ---
 
-# OpenSpec Tasks 生成器
+# OpenSpec Tasks 生成器（极简触发器）
 
 ## 角色与目标
 
-面向设计评审完成、开始实现之前的阶段。本 skill 每次运行都会先触发一次 `lr-openspec-design-merge`（重新合并当前的 design/*.md 并做 Open Questions 硬性检查），合并成功后再读取合并出的 `design.md` 和 specs，输出两份并行产物：
+面向技术评审完成后的阶段。输入是已评审的三端设计文档，输出是：
+1. **design.md**（合并后的完整设计，含 Open Questions 门禁检查）
+2. **test-cases.md**（验收测试用例）
+3. **tasks.md**（实现任务清单）
 
-- `tasks.md`：OpenSpec 原生 artifact，`openspec apply` 靠它的 checkbox 追踪实现进度
-- `test-cases.md`：非原生 artifact，供人工/QA 对照验收，不受 `openspec apply` 追踪
+**本 SKILL 只是 OpenSpec 原生指令的触发器**，所有逻辑在 `schemas/lr-func-dev/schema.yaml` 和 `schemas/lr-func-dev/rules/*.md` 中定义。
 
-本 skill 只做任务拆解和验收用例生成，不做设计决策，不执行任何代码生成或 Prefab 生成。
+---
 
-## 核心原则
+## 使用方式
 
-- `tasks.md` 里的每一条任务只是一段描述文字，本 skill 运行期间不会因为写了这条任务就去生成代码——真正的代码生成发生在 `openspec apply` 执行这个 checkbox 的时候，跟其他 `[Server]`/`[Config]` 任务的执行时机完全一致，UI 相关任务没有任何特殊之处
-- `tasks.md` 和 `test-cases.md` 是两个独立产物，回答不同的问题：`tasks.md` 回答"怎么做"（面向实现），`test-cases.md` 回答"验证什么"（面向 specs 的验收场景），两者都只读 `design.md` 和 specs，互不依赖，可以视为并行生成
-- 本 skill 只依赖合并后的单一 `design.md`，不单独读取 `design/*.md`——`design.md` 是 `lr-openspec-design-merge` 装配出来的完整文件（精简叙事 + 三份详细设计的完整附录），是唯一权威、完整的输入源
-- 本 skill 不做设计决策，也不会自己判断 Open Questions 是否解决——那是 `lr-openspec-design-merge` 的职责，见下方"与 lr-openspec-design-merge 的关系"
-- Prefab 生成、UI 样式/布局调整不属于本 skill 的产物范围，即使读取了 demo 也不会为此生成任务
+```bash
+/lr-openspec-tasks <change-id>
+```
 
-## 与 lr-openspec-design-merge 的关系
+**示例**：
+```bash
+/lr-openspec-tasks growth-fund
+```
 
-`design/client.md`、`design/server.md`、`design/config.md` 是持续可编辑的源文件，评审后可能被再次修改；`design.md` 是从它们装配出来的产物，用来保证 `lr-openspec-tasks` 读到的始终是当前最新版本，**本 skill 每次运行都无条件先触发一次 `lr-openspec-design-merge`**，重新读取当前的 design/*.md 并重新装配 design.md，而不是检查一个旧的 design.md 是否"足够新"。
+---
 
-选择"每次都重新合并"而不是"检测是否过期再决定要不要合并"，是因为过期检测天然不可靠：文件系统的修改时间会被 git checkout、跨机器同步、批量生成等操作打乱，不能反映"内容有没有真的被改过"。既然重新合并的成本不高，而且 `lr-openspec-design-merge` 本身是幂等的（同样的 design/*.md 输入会产生同样的 design.md 输出），直接每次都跑一遍，比维护一套不可靠的过期检测更简单也更可靠。
+## 前置条件检查
 
-`lr-openspec-design-merge` 在合并前有一道硬性检查：三份详细文档的 Open Questions 必须全部回答，且回答质量合格。**本 skill 不会重新做这个检查，也不会在检查失败时自己代为合并或绕过**。原因是两个 skill 的职责必须保持单一：`lr-openspec-design-merge` 是评审闸门，决定"能不能进入实现阶段"；`lr-openspec-tasks` 只负责"设计已经冻结的前提下怎么拆任务"。如果 `lr-openspec-tasks` 自己重新实现一遍简化版的检查逻辑，等于给这道闸门开了后门。
+执行前必须确认以下文件存在：
 
-所以第 0 步触发合并后，只需要确认一件事：**合并是否成功**。判断依据是合并后的 `design.md` 是否存在、且其 `## Open Questions` 顶层章节为空——因为 `lr-openspec-design-merge` 的设计是"检查不通过就不会走到生成 design.md 这一步"，所以只要 design.md 被更新且 Open Questions 章节为空，就代表合并链路走完了整个闸门。如果合并失败（`lr-openspec-design-merge` 输出了阻断信息，没有生成合规的 design.md），本 skill 直接中止，转发阻断信息，不生成任何文件。
+| 文件 | 来源 | 检查命令 |
+|-----|------|---------|
+| `changes/<id>/design/client.md` | `/lr-openspec-design` 生成 | `ls changes/<id>/design/client.md` |
+| `changes/<id>/design/server.md` | `/lr-openspec-design` 生成 | `ls changes/<id>/design/server.md` |
+| `changes/<id>/design/config.md` | `/lr-openspec-design` 生成 | `ls changes/<id>/design/config.md` |
+| `changes/<id>/specs/**/*.md` | `/lr-design` 生成 | `ls changes/<id>/specs/` |
+
+**若文件不存在**：
+```
+❌ 错误：缺少必要输入文件
+
+tasks 生成依赖三端设计文档，但未找到这些文件。
+
+请先运行：
+1. /lr-design <id>（生成 proposal + specs）
+2. /lr-openspec-design <id>（生成三端设计）
+3. 技术评审三端设计文档
+4. 再运行 /lr-openspec-tasks <id>
+```
+
+---
 
 ## 执行流程
 
-### 第 0 步：触发合并并验证结果（严格中断）
+### 步骤 1：设计合并门禁（阶段 6）
 
-1. 无条件触发 `lr-openspec-design-merge`（不做任何"是否需要合并"的判断，每次都跑）
-2. `lr-openspec-design-merge` 内部会先检查三份详细文档的 Open Questions 是否全部解决——这是它自己的硬性门槛，不通过就不会生成合规的 design.md，会直接输出阻断信息
-3. 合并完成后，检查结果：
-   - `changes/<id>/design.md` 是否存在
-   - `design.md` 的 `## Open Questions` 顶层章节是否为空
-4. 检查 `changes/<id>/specs/*.md` 是否存在（至少一个 capability 目录下有 spec.md）
+```bash
+openspec instructions design --change <id>
+```
 
-**中断条件**（任一满足即中止，不生成任何文件）：
+**功能**（由 schema.yaml 定义）：
+1. **Open Questions 检查**（阻断性）
+   - 检查三端设计的 Open Questions 是否全部解决
+   - 检查回答质量：禁止模糊词汇、类型定义要求、处理策略要求
+   - 若检查失败 → 阻断，输出错误详情
 
-1. `lr-openspec-design-merge` 输出了阻断信息（说明 Open Questions 未全部解决或回答质量不合格）
-2. 合并后 `design.md` 不存在，或其 Open Questions 章节仍有内容
-3. `specs/*.md` 不存在
+2. **跨文档对齐检查**（阻断性）
+   - Record 表定义对齐（表名、列名、类型）
+   - 协议定义对齐（协议号、参数）
+   - 配置表定义对齐（表名、字段名、类型）
+   - 若检查失败 → 阻断，输出差异详情
 
-中止时输出：
+3. **合并生成 design.md**
+   - 精简架构叙事（Context/Goals/Decisions/Risks）
+   - 完整附录（附录 A：客户端详细设计、附录 B：服务端详细设计、附录 C：配置表详细设计）
+
+**若门禁检查失败**：
+```
+❌ Open Questions 检查失败
+
+design/client.md:
+  - Q1: 回答包含"待定"（模糊词汇）
+  - Q2: 缺少类型定义
+
+design/server.md:
+  - Q3: 回答包含"先这样"（模糊词汇）
+
+请修正后重新运行。
+```
+
+**产物**：`changes/<id>/design.md`
+
+---
+
+### 步骤 2：验收用例生成（阶段 7）
+
+```bash
+openspec instructions test-cases --change <id>
+```
+
+**功能**（由 schema.yaml 定义）：
+- 从 specs/*.md 和 design.md 生成验收测试用例
+- 每条用例包含：编号、前置条件、操作步骤、预期结果
+- 编号格式：`TC-{spec目录名}-{两位序号}`（如 `TC-growth-fund-purchase-01`）
+
+**产物**：`changes/<id>/test-cases.md`
+
+---
+
+### 步骤 3：实现任务生成（阶段 8）
+
+```bash
+openspec instructions tasks --change <id>
+```
+
+**功能**（由 schema.yaml 定义）：
+- 从 design.md 生成前后端和配置表的实现任务
+- 任务拆分遵循粒度规则（30 分钟 ~ 2 小时，50 ~ 200 行代码）
+- 验证性任务引用 test-cases.md 的用例编号
+
+**产物**：`changes/<id>/tasks.md`
+
+---
+
+### 步骤 4：验证生成结果
+
+```bash
+openspec validate <id>
+```
+
+**若验证失败**：
+- 检查错误输出
+- 修正对应的文件
+- 重新运行 `openspec validate <id>` 直到通过
+
+---
+
+## 输出摘要
+
+生成完成后，输出摘要：
 
 ```text
-❌ lr-openspec-tasks 中止
+✅ Tasks 生成完成
 
-原因：lr-openspec-design-merge 未能成功合并 design.md
-     （通常是因为 design/*.md 的 Open Questions 尚未全部解决）
-
-详情：
-  [转发 lr-openspec-design-merge 的阻断信息]
-
-下一步：
-  回到评审，针对未解决的问题给出明确、完整、可执行的答案，
-  更新 design/[client|server|config].md，然后重新运行本 skill
-  （本 skill 会自动重新触发 lr-openspec-design-merge）
-```
-
-这是硬性中断，不允许带警告继续执行，不允许本 skill 自己代为合并或跳过检查。理由见上方"与 lr-openspec-design-merge 的关系"。
-
-### 第 1 步：读取输入
-
-- `design.md` —— 合并后的完整文档：精简架构叙事（Context/Goals/Decisions/Risks）+ 三份详细设计的完整附录（附录 A 客户端、附录 B 服务端、附录 C 配置表），Open Questions 章节应为空
-- `specs/*.md` —— 验收场景，WHEN/THEN 格式，按 capability 分目录
-- `demo/*.html`（可选，仅当 `changes/<id>/demo/` 目录存在时读取）——只读取以下已冻结白名单内的属性，用于定位某个 UI Panel/Page 对应哪些标注节点：
-  - `data-lr-component`（组件语义类型）
-  - `data-lr-bind`（数据绑定意图）
-  - `data-lr-action`（操作意图）
-  - `data-lr-visible-when`（可见性意图）
-  - `data-lr-template` / `data-lr-slot`（模板与插槽标识）
-  - `data-lr-bake`（Prefab 烘焙时的结构处理方式，仅用于识别节点，不在本 skill 中执行烘焙）
-
-  不解析 CSS 样式、不推导布局、锚点、位置——这些信息属于策划验收 Web Demo 阶段就该定案的范畴，本环节不重新决策，也用不上（`tasks.md` 里的 UI 骨架任务只需要"有哪些字段、字段是什么类型"，不需要"字段长什么样、放哪里"）。
-
-### 第 2 步：并行生成 tasks.md 和 test-cases.md
-
-两者都只读第 1 步的输入，互不依赖，视为两个独立的生成任务。
-
-#### 2.1 tasks.md 生成规则
-
-输出路径：`changes/<id>/tasks.md`
-
-**格式要求**（硬性约束，`openspec apply` 依赖这个格式追踪进度）：
-
-```markdown
-## N. 分组标题
-
-- [ ] N.1 [分类标签] 任务描述
-- [ ] N.2 [分类标签] 任务描述
-```
-
-- 每条任务必须是 `- [ ] N.M 描述` 的 checkbox 格式，不用这个格式的任务不会被 `openspec apply` 追踪
-- 分类标签固定五种，写在任务描述最前面：`[Contract]`、`[Config]`、`[Server]`、`[Client]`、`[Integration]`（`config.yaml` 的 tasks 规则定义的强约束，不得增减或改名）
-- 每个实现任务必须写明目标工程或目标路径（比如 `FsGame/ActivityModule/BusinessActivity/GrowthFund/` 或 `Assets/Script/LogicModule/GrowthFundModule/`）
-- `[Integration]`（跨端联调）任务组必须排在所有其他分类任务组之后
-
-**任务组划分**：按 design.md 的模块/功能点分组，通常对应：
-- 一个 `[Contract]` 组：协议号分配、字段定义对齐
-- 一个 `[Config]` 组：配置表新增/字段补充（依据 design.md 附录 C 的"设计阶段配置表变更"）
-- 一个或多个 `[Server]` 组：按 design.md 附录 B 的模块划分
-- 一个或多个 `[Client]` 组：按 design.md 附录 A 的模块/Panel/Page 划分
-- 一个 `[Integration]` 组：跨端联调验证
-
-**UI 相关的 [Client] 任务**：每个 Panel/Page 固定拆成三条子任务，不再拆更细：
-
-```markdown
-- [ ] N.1 [Client] 生成 {XxxPanel}.cs 骨架
-  目标路径：Assets/Script/UIScript/{XxxPanel}/{XxxPanel}.cs
-  依据：design.md 附录 A 的 UI 设计章节 + demo/{xxx}.html 的 data-lr-* 标注（如果 demo 存在）
-  内容：按命名约定生成成员变量声明（如 data-lr-bind="title" → m_TxtTitle: Text）和空方法签名
-  说明：这条任务描述本身不执行代码生成，只有当 openspec apply 执行这条 checkbox 时才会真正生成代码，
-        这跟其他 [Server]/[Config] 任务的执行时机完全一致，不是特殊情况
-
-- [ ] N.2 [Client] 实现 {XxxPanel} 状态机与交互逻辑
-  目标路径：Assets/Script/UIScript/{XxxPanel}/{XxxPanel}.cs
-  依据：design.md 附录 A 的"状态机"和"交互流程"章节
-
-- [ ] N.3 [Client] 实现 {XxxPanel} 协议收发
-  目标路径：Assets/Script/UIScript/{XxxPanel}/{XxxPanel}.cs（或对应 Module 文件）
-  依据：design.md 附录 A 的"协议定义"章节
-```
-
-如果某个模块没有 demo 可参考（比如纯后台逻辑模块，没有 UI），第一条任务改为直接依据 design.md 附录 A 的模块定义章节生成骨架，不提 demo。
-
-**明确禁止出现的任务类型**（不做的事）：
-
-- ❌ 不得出现任何"生成 Prefab""创建 GameObject""绑定字段到 Prefab"类任务。Prefab 生成是 `openspec apply` 完成之后由另一个独立的 skill 处理，不受 `openspec apply` 追踪，不属于 OpenSpec 原生结构的一部分，不应该出现在 `tasks.md` 里。
-- ❌ 不得出现"设计 UI 样式""调整布局""确定锚点/位置"类任务。样式和布局已经在策划验收 Web Demo 阶段定案，`tasks.md` 阶段只消费已确定的语义标注（组件类型、绑定意图），不重新决策视觉细节。
-
-#### 2.2 test-cases.md 生成规则
-
-输出路径：`changes/<id>/test-cases.md`
-
-test-cases.md 不是 OpenSpec 原生 artifact，`openspec validate` 不检查它，格式相对自由，但按以下默认模板生成：
-
-```markdown
-# Test Cases: {变更名}
-
-## 功能点：{spec 目录名，如 growth-fund-claim}
-
-### 场景 1：{spec.md 中 Scenario 的标题}
-
-- **前置条件**：[从 GIVEN 提取]
-- **操作步骤**：[从 WHEN 提取]
-- **预期结果**：[从 THEN 提取]
-- **验证点**：
-  - [从 design.md 的 Decisions 章节或附录 A/B/C 提取的技术验证细节，
-    比如协议号、错误码、Record 表字段、配置表字段]
-- **来源**：specs/{spec目录名}/spec.md - {Requirement 标题} - {Scenario 标题}
-
-### 场景 2：...
-```
-
-- 按 `specs/*.md` 的目录结构分组，一个 spec 目录（一个 capability）对应一个"功能点"分组
-- 每条 `#### Scenario` 场景生成至少一条测试用例，`GIVEN` → 前置条件，`WHEN` → 操作步骤，`THEN` → 预期结果
-- "验证点"字段从 `design.md` 中提取技术细节作为补充（比如"验证协议返回码 XXX_ERR_ALREADY_CLAIMED=1004"、"验证 GROWTH_FUND_OPEN_REC 新增一行"），让测试用例不止是复述 specs，还能落到可核对的技术信号
-- "来源"字段必须精确到具体是哪个 spec 文件的哪个 Requirement 下的哪个 Scenario，方便测试用例和验收场景对得上
-
-### 第 3 步：test-cases.md 完整性自检（仅警告，不阻断）
-
-- 遍历 `specs/*.md` 的所有 `#### Scenario` 场景
-- 检查每个场景是否在生成的 `test-cases.md` 里有对应的测试用例（按"来源"字段回溯匹配）
-- 缺失场景只输出警告清单，不阻断流程：
-
-```text
-⚠️ test-cases.md 完整性检查
-
-以下 specs 场景未在 test-cases.md 中找到对应测试用例：
-  - specs/growth-fund-xxx/spec.md - {Requirement} - {Scenario}
-  - ...
-
-说明：某些场景可能是纯技术实现细节，不一定需要独立测试用例。
-      请人工评审时确认这些缺失是否合理。
-```
-
-不设置任何人工豁免标记机制（比如不提供"标记为不需要用例"的功能），这次先不扩展，后续视实际使用情况再决定是否需要。
-
-### 第 4 步：运行 openspec validate
-
-运行 `openspec validate <id>`，检查范围：
-
-- `tasks.md` 的结构（checkbox 格式、`[Contract]`/`[Config]`/`[Server]`/`[Client]`/`[Integration]` 分类标签、`[Integration]` 排在最后）
-- 复检 `proposal.md`、`specs/*.md`、`design.md` 是否仍然合法
-
-**明确说明**：`test-cases.md` 不在 `openspec validate` 的覆盖范围内。它的完整性检查是本 skill 第 3 步自己做的，不是 OpenSpec 原生机制的一部分——`openspec validate` 只认 schema 里定义的 artifact（`proposal`/`specs`/`design`/`tasks`），`test-cases.md` 不是其中之一。
-
-如果 validate 失败，修复 `tasks.md` 中的结构问题后重新运行，直到通过。
-
-### 第 5 步：输出交接摘要
-
-```text
 变更名: <id>
 
-tasks.md 生成完成:
-  - 共 N 个任务组，M 个任务
-  - 分类：[Contract] X 个，[Config] Y 个，[Server] Z 个，[Client] W 个，[Integration] V 个
+产物:
+  - changes/<id>/design.md（合并后的完整设计）
+  - changes/<id>/test-cases.md（验收用例，N 条）
+  - changes/<id>/tasks.md（实现任务，客户端 X 个，服务端 Y 个，配置表 Z 个）
 
-test-cases.md 生成完成:
-  - 共 K 个功能点，L 条测试用例
-  - 完整性检查: ✅ 所有 specs 场景已覆盖
-                / ⚠️ 缺少 N 个场景对应用例（见上方清单）
+验证状态: ✅ 通过 / ❌ 失败（见错误详情）
 
-openspec validate: ✅ 通过
-
-下一步: 人工联合评审
-  1. 评审 tasks.md：任务拆分是否合理？目标路径是否正确？跨端联调顺序是否恰当？
-  2. 评审 test-cases.md：验收场景覆盖是否完整？验证点是否可核对？
-  3. 评审通过后，运行 openspec apply <id> 开始实施
+下一步:
+1. 审查 tasks.md，确认任务拆分合理
+2. 执行代码生成：openspec apply <id>
 ```
 
-## 完成条件
+---
 
-- `changes/<id>/tasks.md` 已生成，符合 OpenSpec checkbox 格式和 `config.yaml` 的分类约束
-- `changes/<id>/test-cases.md` 已生成，覆盖 specs 的验收场景
-- 完整性自检已执行（警告级，不阻断）
-- `openspec validate <id>` 通过
-- 输出交接摘要，明确"tasks 生成完成，等待人工联合评审，评审通过后可以 openspec apply"
+## 设计逻辑说明
 
-## 不做的事
+**本 SKILL 不包含任何设计逻辑**，所有逻辑在以下文件中定义：
 
-- 不做设计决策（假设 design 已经冻结，只负责任务拆解）
-- 不重新检查 Open Questions 的具体内容（那是 `lr-openspec-design-merge` 内部的职责；本 skill 只确认合并链路是否成功完成，见上方"与 lr-openspec-design-merge 的关系"）
-- 不跳过 `lr-openspec-design-merge`（每次运行都无条件先触发一次，不允许因为"看起来没改过"就跳过合并）
-- 不生成任何 UI 脚本代码、Prefab 或其他实现产物（本 skill 只生成任务描述和测试用例文档，实际代码生成发生在 `openspec apply` 阶段）
-- 不生成"生成 Prefab"类任务（Prefab 生成是 apply 之后的独立 skill 职责）
-- 不生成"设计 UI 样式/布局"类任务（已在策划验收阶段定案）
-- 不修改 `design.md`、`design/*.md`、`specs/*.md`（只读取；`design.md` 由 `lr-openspec-design-merge` 负责写入）
-- 不为 test-cases.md 的完整性检查提供人工豁免标记机制
+| 文件 | 职责 |
+|-----|------|
+| `schemas/lr-func-dev/schema.yaml` | artifact 定义、门禁检查规则、合并规则 |
+| `schemas/lr-func-dev/rules/tasks/client-implementation.md` | 客户端任务拆分规则 |
+| `schemas/lr-func-dev/rules/tasks/server-implementation.md` | 服务端任务拆分规则 |
+| `schemas/lr-func-dev/rules/tasks/config-implementation.md` | 配置表任务拆分规则 |
 
-## 路径约定
+---
 
-- **openspec 根**：包含 config.yaml 的目录
-- **changes 目录**：`<openspec根>/changes/<id>/`
-- **合并后设计**（唯一读取的设计输入）：`<changes目录>/design.md`
-- **详细设计源文件**（由 `lr-openspec-design-merge` 读取，本 skill 不直接读取）：`<changes目录>/design/*.md`
-- **验收场景**：`<changes目录>/specs/*/spec.md`
-- **Web 原型**（可选）：`<changes目录>/demo/*.html`
-- **任务清单**：`<changes目录>/tasks.md`
-- **测试用例**：`<changes目录>/test-cases.md`
+## 与旧版本的差异
 
-所有路径引用使用相对路径，不使用绝对路径。
+### 旧版本（已废弃）
 
-## 使用场景
+- SKILL 包含设计合并逻辑
+- SKILL 包含 Open Questions 检查逻辑
+- SKILL 包含任务拆分逻辑
+- 需要先运行 `/lr-openspec-design-merge`（独立 SKILL）
 
+### 新版本（当前）
+
+- SKILL 只是触发器，调用 OpenSpec 原生指令
+- 所有逻辑在 schema.yaml 中
+- 设计合并门禁（阶段 6）已集成到 `openspec instructions design`
+- 无需独立的 `lr-openspec-design-merge` SKILL
+
+---
+
+## 与 lr-openspec-design-merge 的关系
+
+**lr-openspec-design-merge 已废弃**，其功能已完全集成到 OpenSpec 的 `design` artifact（阶段 6：设计合并门禁）中。
+
+**原 lr-openspec-design-merge 的功能**：
+1. ✅ Open Questions 检查 → 已集成到 `openspec instructions design`
+2. ✅ 回答质量检查 → 已集成到 `openspec instructions design`
+3. ✅ 跨文档对齐检查 → 已集成到 `openspec instructions design`
+4. ✅ 合并生成 design.md → 已集成到 `openspec instructions design`
+
+**新流程**：
 ```
-完整链路：
-1. lr-design 生成 proposal + specs delta + demo（策划侧闭环）
-2. lr-openspec-design 生成 design/client.md + design/server.md + design/config.md（技术评审准备）
-3. 前端/后端/策划联合评审，直接修改 design/*.md 反映评审结果
-4. lr-openspec-tasks（本 skill）启动：
-   a. 无条件先触发 lr-openspec-design-merge
-      （内部硬性检查 design/*.md 的 Open Questions 全部解决，通过后装配 design.md）
-   b. 若合并失败则中止；若成功则继续
-   c. 只读取合并后的 design.md，并行生成 tasks.md + test-cases.md
-5. 人工联合评审 tasks.md + test-cases.md
-6. openspec apply <id> 按 tasks.md 逐条实施
-7. （apply 完成后）独立 skill 处理 Prefab 生成，读取已完成的 UI 脚本和 demo，不属于本链路
+/lr-openspec-design <id>
+  ↓
+技术评审（人工）
+  ↓
+/lr-openspec-tasks <id>
+  ↓ 自动调用 openspec instructions design（含门禁检查）
+  ↓ 自动调用 openspec instructions test-cases
+  ↓ 自动调用 openspec instructions tasks
+  ↓
+design.md + test-cases.md + tasks.md
 ```
+
+---
+
+## 常见问题 FAQ
+
+### Q1: 如果 Open Questions 检查失败怎么办？
+
+**A**: 修改对应的 design/*.md 文件，解决所有 Open Questions，然后重新运行 `/lr-openspec-tasks <id>`。
+
+门禁检查会告诉你哪些问题未解决、哪些回答质量不合格。
+
+---
+
+### Q2: 为什么要合并三端设计为 design.md？
+
+**A**: 
+1. 避免后续步骤（tasks 生成、apply 执行）重复读取三个文件
+2. 强制执行 Open Questions 门禁检查
+3. 提供精简的架构叙事（Context/Goals/Decisions/Risks）供评审和查阅
+
+---
+
+### Q3: 如果生成的 tasks 不符合预期怎么办？
+
+**A**: 修改对应的规则文件：
+- 客户端任务问题 → 修改 `schemas/lr-func-dev/rules/tasks/client-implementation.md`
+- 服务端任务问题 → 修改 `schemas/lr-func-dev/rules/tasks/server-implementation.md`
+- 配置表任务问题 → 修改 `schemas/lr-func-dev/rules/tasks/config-implementation.md`
+
+然后重新运行 `/lr-openspec-tasks <id>`
+
+---
+
+### Q4: 为什么不需要 lr-openspec-design-merge 了？
+
+**A**: 
+1. 设计合并门禁功能已集成到 OpenSpec 的 `design` artifact（阶段 6）
+2. 所有检查逻辑在 schema.yaml 中定义，避免重复维护
+3. 简化用户心智模型（少一个 SKILL）
+
+---
+
+## 版本信息
+
+**版本**: v2.0 (极简触发器)  
+**更新日期**: 2026-07-22  
+**设计哲学**: SKILL 只负责触发，逻辑在 schema.yaml 中  
+**废弃 SKILL**: lr-openspec-design-merge（功能已集成）

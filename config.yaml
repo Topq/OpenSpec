@@ -1,0 +1,32 @@
+schema: lr-func-dev
+
+context: |
+  这是灵刃游戏的跨端 OpenSpec 根。
+
+  项目目录（相对于 D:\se）：
+  - 客户端工程：../develop/client/project
+  - 服务端工程：../develop/server/project
+  - 策划配置：../design/table/default_ios
+
+  职责边界：
+  - 客户端负责 Unity UI、客户端状态、表现和协议调用。
+  - 服务端负责权威状态、业务校验、存储、奖励发放和协议处理。
+  - 策划配置负责活动、奖励、目标、商品等数据定义。
+  - 跨端业务能力必须同时分析客户端、服务端和策划配置的影响。
+  - Assets/LingRen 属于客户端引擎层，除非明确要求，否则不得修改。
+
+  技术栈：
+  - 客户端：Unity 2022.3.62f2、C# 9.0、TextMeshPro、LR 自定义组件（AsyncTexture/Localizer/ScrollView 等）
+  - 服务端：C++11、FsGame 框架、Record 表机制（KV 存储 + 列枚举）、协议采用 Protobuf
+  - 策划配置：Excel → txt 导出、客户端自动生成代码、服务端 READ_FILE 解析
+
+rules:
+  # 产物级约束（硬性、简短、可被 validate 检查）
+  proposal:
+    - Capability 必须按业务能力划分，不得按技术分层。
+    - Impact 必须明确标出三端各自受影响的区域和不涉及的区域。
+  design:
+    - 合并前必须确保三端的 Open Questions 全部解决。
+  tasks:
+    - 任务必须使用 [Contract]、[Config]、[Server]、[Client]、[Integration] 分类。
+    - 业务逻辑任务必须标注"对应验收：TC-xxx"。
