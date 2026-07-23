@@ -65,6 +65,93 @@
 
 ---
 
+## 0.1 配置表代码生成规范（强制）
+
+**禁止手写配置表 CS 代码**，必须通过工具生成。
+
+### 配置表代码生成流程
+
+**步骤 1：注册配置表名**
+- 文件：`D:\se\develop\client\tools\table\table_config\outcode_config.json`
+- 在 `need_copy` 数组中添加表名（不含 `.txt` 后缀，小写+下划线格式）
+- 示例：`"active_fund_main"`, `"activity_mix_growthfund_reward"`
+
+**步骤 2：检查是否需要 NeedParseDataMethod 配置**
+- 如果配置表字段属性为 **纯S（Server only）** 且用于活动系统，需额外配置
+- 在 `NeedParseDataMethod` 数组中添加同样的表名
+- **判断依据**：查看 `design/config.md` 中字段定义表的"属性"列
+  - 所有字段都标记为 S → 需要添加到 `NeedParseDataMethod`
+  - 有任何字段标记为 C 或 A → 不需要添加
+
+**步骤 3：生成代码**
+- 双击运行 `D:\se\develop\client\tools\table\output_code_csharp.bat`
+- 自动生成 4 个文件：
+  - `Assets/Script/Table/Generate/Activity/{TableName}/TD{TableName}.cs` （数据类）
+  - `Assets/Script/Table/Generate/Activity/{TableName}/TD{TableName}Table.cs` （表管理类）
+  - `Assets/Script/Table/Extend/Activity/{TableName}/TD{TableName}Extend.cs` （数据扩展，首次生成空实现）
+  - `Assets/Script/Table/Extend/Activity/{TableName}/TD{TableName}TableExtend.cs` （表扩展，含动态加载逻辑）
+
+**步骤 4：验证生成结果**
+- 检查 Generate 目录下的文件是否包含所有字段（对比 design/config.md 的字段定义）
+- 检查字段类型是否正确（int/string/float）
+- 检查 `ParseData` 方法是否正确解析每个字段
+
+**违反规范的后果**：
+- 手写配置表代码可能遗漏字段、类型不匹配、`ParseData` 逻辑错误
+- 后续策划修改配置表字段时，手写代码不会自动同步，导致运行时解析失败
+
+---
+
+## 0.2 UI 脚本注册规范（强制）
+
+**继承 AbstractPage（或其子类如 BaseActivityPage）的 UI 脚本必须注册到 UIDataTable**。
+
+### UI 注册流程
+
+**步骤 1：添加 UIID 枚举**
+- 文件：`D:\se\develop\client\project\Assets\Script\Table\Data\Define\UIDefine.cs`
+- 在 `enum UIID` 中添加新的 UI ID（按功能模块分组，插入到相似 UI 附近）
+- 命名规则：UI 类名去掉 `.cs` 后缀，保持大小写一致
+- 示例：
+  ```csharp
+  // 运营活动
+  SpecialLoginActivityPage,          // 七日登陆活动(通用模板)
+  ActivitySevenDayTaskPage,           // 七日任务活动
+  ActivityDevelopPlanPage,            // 成长计划活动
+  GrowthFundPage,                     // 成长基金活动（新增）
+  ActivityDrawKOIPage,                // 锦鲤活动
+  ```
+
+**步骤 2：注册 UI 到 UIDataTable**
+- 文件：`D:\se\develop\client\project\Assets\Script\LogicModule\UIModule\Data\UIDataTable.cs`
+- 在 `InitUIDataTable()` 方法中添加 `AddPanelData` 调用（按功能模块分组，插入到相似 UI 附近）
+- API 格式：
+  ```csharp
+  AddPanelData(UIID.{UI类名}, typeof({UI类名}), "{Prefab相对路径}");
+  ```
+- Prefab 路径规则：
+  - 只需要相对路径片段，不需要 `Assets/Prefab/UI/` 前缀和 `.prefab` 后缀
+  - 一般按功能模块分目录：`"WelfareActivityPanel/GrowthFundPage"`
+- 示例：
+  ```csharp
+  // 运营活动
+  AddPanelData(UIID.SpecialLoginActivityPage, typeof(SpecialLoginActivityPage), "WelfareActivityPanel/SpecialLoginActivityPage");
+  AddPanelData(UIID.ActivitySevenDayTaskPage, typeof(ActivitySevenDayTaskPage), "WelfareActivityPanel/ActivitySevenDayTaskPage");
+  AddPanelData(UIID.ActivityDevelopPlanPage, typeof(ActivityDevelopPlanPage), "WelfareActivityPanel/ActivityDevelopPlanPage");
+  AddPanelData(UIID.GrowthFundPage, typeof(GrowthFundPage), "WelfareActivityPanel/GrowthFundPage");
+  ```
+
+**步骤 3：验证注册**
+- 编译通过（`UIID.GrowthFundPage` 和 `typeof(GrowthFundPage)` 无报错）
+- 运行时通过 `UIModule.OpenPage(UIID.GrowthFundPage)` 能正常打开 UI
+
+**违反规范的后果**：
+- 未注册 UIID：`UIID.GrowthFundPage` 编译错误（CS0117）
+- 未注册 UIDataTable：运行时调用 `OpenPage(UIID.GrowthFundPage)` 无反应或报空引用错误
+- Prefab 路径错误：UI 能打开但显示为空或加载失败
+
+---
+
 ## 一、任务拆分粒度规则
 
 ### 1.1 粒度标准（阻断性）
@@ -275,6 +362,57 @@ TDGrowthFundTable.metaData,
 |---------|---------------|---------|
 | 红点注册 | `RegisterRedPointCallback BusinessActivityType` | BusinessActivityModule_RedPoint.cs |
 | 红点刷新 | `DirtyRedPoint` | - |
+
+---
+
+### 4.5 配置表相关（重要）
+
+**⚠️ 配置表代码必须通过工具生成，禁止手写**
+
+| 任务类型 | 前置检查 | 操作步骤 |
+|---------|---------|---------|
+| 生成配置表代码 | 1. 确认 design/config.md 已标注字段 S/C/A 属性<br>2. 确认 design/config.md 已标注配置加载方式（静态/动态）<br>3. 确认 design/config.md 已给出 outcode_config.json 配置建议 | 1. 修改 `outcode_config.json` 添加表名<br>2. 运行 `output_code_csharp.bat` 生成代码<br>3. 验证生成的文件字段完整性 |
+
+**配置前置检查详细步骤**：
+
+1. **检查 design/config.md 是否完整**：
+   ```bash
+   # 检查字段属性列是否标注（S/C/A）
+   grep "属性.*S/C/A" design/config.md
+   
+   # 检查 outcode_config 配置建议是否存在
+   grep "outcode_config.json 配置建议" design/config.md
+   ```
+
+2. **根据 design/config.md 的建议修改 outcode_config.json**：
+   - 文件位置：`D:\se\develop\client\tools\table\table_config\outcode_config.json`
+   - 如果包含 C 或 A 字段 → 添加到 `need_copy` 数组
+   - 如果是动态活动配置 → 添加到 `NeedParseDataMethod` 数组
+
+3. **生成代码**：
+   ```bash
+   cd D:\se\develop\client\tools\table
+   双击 output_code_csharp.bat
+   ```
+
+4. **验证生成结果**：
+   - 检查 `Assets/Script/Table/Generate/{模块}/{表名}/` 下是否生成 4 个文件
+   - 对比生成的字段列表与 design/config.md 是否一致
+   - 运行 `dotnet build` 检查是否有编译错误
+
+**常见错误**：
+- ❌ 手写配置表代码 → 字段遗漏、类型不匹配、ParseData 逻辑错误
+- ❌ 未检查 design/config.md → 不知道应该配置 need_copy 还是 NeedParseDataMethod
+- ❌ 配置表名拼写错误 → bat 脚本找不到对应的 xlsx 文件，生成失败
+
+**CodeGraph 查询参考**（用于验证生成结果）：
+```
+# 查询现有配置表的结构
+TDActivityKoiReward ParseData activeId rewardId
+
+# 查询配置表的访问方式
+TDActivityKoiRewardTable GetData InsertDynamicData
+```
 
 ---
 

@@ -315,11 +315,67 @@ apply_instruction = Bash("openspec instructions apply --change {change-id}")
 
 ##### [Config] 配置表
 
-1. 读取 `design.md` 附录 C（配置表定义）
-2. 策划填写配置表（此类任务由策划手动完成，AI 跳过）
-3. 如果是客户端生成配置表代码（[Client] 标签）：
-   - 用 CodeGraph 查询 `TableConfig` 注册模板
-   - 生成配置表 C# 代码
+**⚠️ 配置表代码必须通过工具生成，禁止手写**
+
+**前置检查**：
+1. 读取 `design/config.md`，检查是否包含以下必需信息：
+   - 字段定义表的"属性"列（S/C/A 标注）
+   - "配置加载方式"说明（静态配置/动态配置）
+   - "outcode_config.json 配置建议"章节
+
+2. 如果缺少上述信息，输出错误并停止：
+   ```
+   ❌ design/config.md 缺少 outcode_config.json 配置建议
+   
+   无法判断应该配置 need_copy 还是 NeedParseDataMethod。
+   请先完善 design/config.md 后再执行 [Config] 任务。
+   ```
+
+**执行步骤**（仅当前置检查通过）：
+
+1. **策划填写配置表数据**（此类任务由策划手动完成，AI 跳过）
+
+2. **客户端生成配置表代码**（[Client] 标签的 [Config] 任务）：
+   
+   **步骤 2.1：配置 outcode_config.json**
+   - 文件：`D:\se\develop\client\tools\table\table_config\outcode_config.json`
+   - 根据 design/config.md 的"outcode_config.json 配置建议"：
+     - 如果需要 need_copy → 在 `need_copy` 数组末尾添加表名（逗号分隔）
+     - 如果需要 NeedParseDataMethod → 在 `NeedParseDataMethod` 数组末尾添加表名
+   - 示例：
+     ```json
+     "need_copy": [
+       ...,
+       "active_fund_main",
+       "activity_mix_growthfund_reward"
+     ],
+     "NeedParseDataMethod": [
+       ...,
+       "active_fund_main",
+       "activity_mix_growthfund_reward"
+     ]
+     ```
+
+   **步骤 2.2：生成配置表代码**
+   ```bash
+   cd D:\se\develop\client\tools\table
+   双击 output_code_csharp.bat
+   # 或命令行执行
+   cmd /c "D:\se\develop\client\tools\table\output_code_csharp.bat"
+   ```
+
+   **步骤 2.3：验证生成结果**
+   - 检查是否生成 4 个文件：
+     - `Assets/Script/Table/Generate/{模块}/{表名}/TD{表名}.cs`
+     - `Assets/Script/Table/Generate/{模块}/{表名}/TD{表名}Table.cs`
+     - `Assets/Script/Table/Extend/{模块}/{表名}/TD{表名}Extend.cs`
+     - `Assets/Script/Table/Extend/{模块}/{表名}/TD{表名}TableExtend.cs`
+   - 对比生成的字段列表与 design/config.md 的字段定义是否一致
+   - 进入编译验证步骤（步骤 6.5.2）
+
+**禁止操作**：
+- ❌ 使用 Write 工具手写配置表 CS 代码
+- ❌ 复制其他配置表代码后手动替换类名和字段
 
 ##### [Server] 服务端实现
 
