@@ -1,0 +1,23 @@
+{
+  "semanticId": "content.async-image",
+  "componentType": "UnityEngine.GameObject",
+  "description": "异步加载图片组件。用于需要运行时动态加载的图片资源。",
+  "hierarchy": [],
+  "components": [
+    {
+      "type": "UnityEngine.UI.Image",
+      "properties": {
+        "preserveAspect": true,
+        "raycastTarget": false
+      }
+    },
+    {
+      "type": "LR.AsyncTexture",
+      "properties": {}
+    }
+  ],
+  "notes": [
+    "无子节点，只在根节点挂载 Image 和 AsyncTexture 两个组件。",
+    "preserveAspect=true 保持图片宽高比，避免拉伸变形。"
+  ]
+}

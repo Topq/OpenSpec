@@ -1,0 +1,26 @@
+{
+  "semanticId": "text.localized",
+  "componentType": "UnityEngine.GameObject",
+  "description": "多语言文本组件（默认样式）。",
+  "components": [
+    {
+      "type": "TMPro.TextMeshProUGUI",
+      "properties": {
+        "font": "Assets/Resources/Font/fzhjtSDF.asset",
+        "fontSharedMaterial": "Assets/Resources/Font/fzhjtSDF_UI_Default.mat",
+        "fontSize": 24,
+        "color": "#FFFFFF",
+        "alignment": "Left"
+      }
+    },
+    {
+      "type": "LR.Localizer",
+      "properties": {}
+    }
+  ],
+  "hierarchy": [],
+  "notes": [
+    "默认样式：白色、24 号字、左对齐、带默认描边材质",
+    "无子节点，只在根节点挂载 TextMeshProUGUI 和 Localizer 两个组件"
+  ]
+}

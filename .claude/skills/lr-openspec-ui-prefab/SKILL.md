@@ -1,6 +1,6 @@
 ---
 name: lr-openspec-ui-prefab
-description: 根据已验收的 Web 原型 + lr-openspec-apply 生成的 UI 脚本，生成 Unity UI Prefab 的中间数据（TSX），校验字段完整性后交给 Unity 常驻生成器一次性构建 GameObject 树、挂载组件、绑定序列化字段。强制使用 TextMeshPro。
+description: 根据已验收的 React 原型 + lr-openspec-apply 生成的 UI 脚本，生成 Unity UI Prefab 的中间数据（TSX），校验字段完整性后交给 Unity 常驻生成器一次性构建 GameObject 树、挂载组件、绑定序列化字段。强制使用 TextMeshPro。
 ---
 
 # OpenSpec UI Prefab 生成器
@@ -11,7 +11,7 @@ description: 根据已验收的 Web 原型 + lr-openspec-apply 生成的 UI 脚�
 
 输入三样：
 
-1. **策划已验收的 Web 原型**（`changes/<id>/demo/index.html`，`lr-design` 产出，只读，视觉/交互基准）
+1. **策划已验收的 React 原型**（`changes/<id>/demo/src/**/*.tsx`，`lr-design` 产出，只读，视觉/交互基准）
 2. **C# 脚本的 `[SerializeField]` 字段清单**（`lr-openspec-apply` 已生成，这是硬约束，不是参考）
 3. **组件白名单**（`.claude/skills/lr-design/references/unity-ui-components.md`，已通过 MCP 扫描项目真实 Prefab 生成）
 
@@ -92,7 +92,8 @@ GrowthFundPage.cs:
 
 只读，不修改：
 
-- `changes/<id>/demo/index.html`——理解已验收的视觉方向、层级关系、文案
+- `changes/<id>/demo/src/**/*.tsx`——理解已验收的视觉方向、层级关系、文案（React 组件源码，包括拆分的独立组件）
+- `changes/<id>/demo/dist/index.html`（可选）——构建后的静态 HTML，用于坐标测量
 - `.claude/skills/lr-design/references/unity-ui-components.md`——语义组件 ID 白名单
 - [unity-layout-attributes.md](references/unity-layout-attributes.md)——TSX 的 `data-*` 属性规范（本技能专用）
 
@@ -109,7 +110,7 @@ GrowthFundPage.cs:
 5. 视觉细节（图片、圆角、渐变、阴影）不翻译；配套 CSS 只用于基础预览识别。
 6. 根节点画布尺寸固定 `data-size="(1920, 1080)"`。
 
-发现 `index.html` 与 C# 字段之间存在结构性矛盾时（比如脚本要三个领取按钮但原型只有一个入口），停止生成，回报使用者，不静默拍板改设计。
+发现 React 原型与 C# 字段之间存在结构性矛盾时（比如脚本要三个领取按钮但原型只有一个入口），停止生成，回报使用者，不静默拍板改设计。
 
 ### 步骤 4：校验
 
@@ -132,9 +133,24 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/tsx_to_json.py changes/<id>/
 
 只在步骤 4 零错误后执行；此脚本不重新校验，信任输入已经是合法的。
 
-### 步骤 6：调用 Unity 生成器
+### 步骤 6：部署生成器脚本到 Unity 项目
 
-用 `mcp__ai-game-developer__reflection-method-call` 调用项目常驻的 Editor 脚本 `LRUIPrefabGen.LRUnityLayoutPrefabGenerator.GenerateFromLayout`：
+生成器源码（5 个 `.cs` + 11 个配方 `.json`）平时不常驻 Unity 项目，只在生成 Prefab 时临时部署，用完即删——源码始终以 `.claude/skills/lr-openspec-ui-prefab/scripts/lr_ui_gen/` 为唯一真相源，不要直接改 Unity 项目里部署出来的副本。
+
+```bash
+python .claude/skills/lr-openspec-ui-prefab/scripts/deploy_lr_ui_gen.py <unity-project-root>
+```
+
+部署脚本是幂等的：如果目标目录 `Assets/Editor/LRUIPrefabGen/` 已存在（比如上次执行中断留下的残留），会先删除再重新复制，不会合并冲突。
+
+部署完成后：
+
+1. 调用 `mcp__ai-game-developer__assets-refresh` 让 Unity 感知新文件
+2. 轮询 `mcp__ai-game-developer__editor-application-get-state` 直到 `IsCompiling: false`（不要在编译中调用步骤 7 的生成器，会拿到未编译完成的旧类型或直接调用失败）
+
+### 步骤 7：调用 Unity 生成器
+
+用 `mcp__ai-game-developer__reflection-method-call` 调用刚部署的 Editor 脚本 `LRUIPrefabGen.LRUnityLayoutPrefabGenerator.GenerateFromLayout`：
 
 ```json
 {
@@ -159,6 +175,18 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/tsx_to_json.py changes/<id>/
 2. 用 `mcp__ai-game-developer__screenshot-isolated` 截图确认视觉效果。
 3. 检查 Unity Console 是否有 `LRComponentRecipes`/`LRFieldBinder` 的 Warning（说明某个语义 ID 或字段没找到对应实现，需要回头修 TSX 或补白名单/生成器逻辑）。
 4. 向使用者报告：生成了哪些 Prefab、绑定了多少字段、有哪些遗留 Warning。
+
+### 步骤 8：清理部署的生成器脚本
+
+生成和验证完成后，删除步骤 6 部署到 Unity 项目的临时脚本，恢复项目干净状态：
+
+```bash
+python .claude/skills/lr-openspec-ui-prefab/scripts/cleanup_lr_ui_gen.py <unity-project-root>
+```
+
+清理完成后调用 `mcp__ai-game-developer__assets-refresh`，让 Unity 感知删除。
+
+如果执行过程中断（AI 会话被压缩/用户中止/MCP 超时），下次运行步骤 6 时部署脚本会自动清理上次残留，所以不需要专门手动清理孤儿文件。
 
 ## 常见问题处理
 

@@ -1,0 +1,19 @@
+{
+  "semanticId": "content.icon",
+  "componentType": "UnityEngine.GameObject",
+  "description": "图标组件。用于功能入口、物品图标等小图展示。",
+  "components": [
+    {
+      "type": "UnityEngine.UI.Image",
+      "properties": {
+        "sprite": "Assets/UI/AtlasResources/FuncMenuListIcon/zjm_icon_07.png",
+        "raycastTarget": false
+      }
+    }
+  ],
+  "hierarchy": [],
+  "notes": [
+    "默认图标: zjm_icon_07.png",
+    "raycastTarget=false 不响应点击事件（通常由父节点按钮响应）"
+  ]
+}

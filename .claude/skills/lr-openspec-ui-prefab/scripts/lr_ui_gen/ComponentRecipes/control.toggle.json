@@ -1,0 +1,60 @@
+{
+  "semanticId": "control.toggle",
+  "componentType": "UnityEngine.UI.Toggle",
+  "description": "二态切换控件。项目扩展了原生 Toggle，增加 m_ActiveContentRoot/m_UnActiveContentRoot 字段分别控制选中/未选中状态的显示内容。",
+  "scanSource": "基于 2026-07-27 扫描 Assets/Resources/PanelUI 的 770 个 Prefab，564 个 Toggle 实例，Rank 1 配方（138 实例，24.5%）。",
+  "hierarchy": [
+    {
+      "nodeName": "Unselected",
+      "isRequired": true,
+      "components": [
+        {
+          "type": "UnityEngine.UI.Image",
+          "properties": {
+            "raycastTarget": false,
+            "color": "#FFFFFF"
+          }
+        }
+      ],
+      "bindToField": "m_UnActiveContentRoot",
+      "layoutDefaults": {
+        "anchorMin": [0, 0],
+        "anchorMax": [1, 1],
+        "sizeDelta": [0, 0],
+        "pivot": [0.5, 0.5]
+      }
+    },
+    {
+      "nodeName": "Selected",
+      "isRequired": true,
+      "components": [
+        {
+          "type": "UnityEngine.UI.Image",
+          "properties": {
+            "raycastTarget": false,
+            "color": "#FFFFFF"
+          }
+        }
+      ],
+      "bindToField": "graphic,m_ActiveContentRoot",
+      "layoutDefaults": {
+        "anchorMin": [0, 0],
+        "anchorMax": [1, 1],
+        "sizeDelta": [0, 0],
+        "pivot": [0.5, 0.5]
+      }
+    }
+  ],
+  "defaultValues": {
+    "m_IsOn": false,
+    "toggleTransition": "Fade",
+    "m_Interactable": true
+  },
+  "notes": [
+    "项目使用了扩展的 Toggle（增加了 m_ActiveContentRoot/m_UnActiveContentRoot 字段），不是 Unity 原生 Toggle。",
+    "标准两态模式：子节点[0] = 未选中状态，子节点[1] = 选中状态。",
+    "graphic 字段（勾选态图片）与 m_ActiveContentRoot 指向同一节点。",
+    "Rank 1 使用 Fade 动画（占 24.5%），Rank 2 使用 None 无动画（占 12.6%），新配方默认 Fade。",
+    "m_Group 字段（ToggleGroup）在配方中不设置，由 UI 开发阶段根据业务需求手动配置。"
+  ]
+}

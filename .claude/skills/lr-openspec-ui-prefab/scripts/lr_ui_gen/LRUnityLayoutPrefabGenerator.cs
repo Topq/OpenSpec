@@ -1,0 +1,656 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using Newtonsoft.Json.Linq;
+using TMPro;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace LRUIPrefabGen
+{
+    /// <summary>
+    /// Reads the JSON layout produced by lr-openspec-ui-prefab/scripts/tsx_to_json.py
+    /// and builds the corresponding Unity UI prefab: GameObject tree, RectTransform,
+    /// components per the unity-ui-components.md whitelist, and [SerializeField]
+    /// binding via reflection. No AI participates in this step; same JSON always
+    /// produces the same prefab.
+    /// </summary>
+    public static class LRUnityLayoutPrefabGenerator
+    {
+        [MenuItem("Tools/LR/Generate Prefab From Layout JSON...")]
+        public static void GenerateFromMenu()
+        {
+            string jsonPath = EditorUtility.OpenFilePanel("选择布局 JSON", Application.dataPath, "json");
+            if (string.IsNullOrEmpty(jsonPath))
+            {
+                return;
+            }
+
+            string prefabPath = EditorUtility.SaveFilePanelInProject(
+                "保存 Prefab",
+                "GeneratedPanel",
+                "prefab",
+                "选择 Prefab 输出路径");
+            if (string.IsNullOrEmpty(prefabPath))
+            {
+                return;
+            }
+
+            GenerateFromLayout(jsonPath, prefabPath, null);
+        }
+
+        /// <summary>
+        /// Main entry point. jsonPath: absolute or project-relative path to the
+        /// layout JSON. prefabPath: project-relative path (Assets/...) for the
+        /// output prefab. rootScriptTypeName: optional full type name (e.g.
+        /// "LR.GrowthFundPage") to attach to the root and receive field bindings.
+        /// </summary>
+        public static string GenerateFromLayout(string jsonPath, string prefabPath, string rootScriptTypeName)
+        {
+            string jsonText = File.ReadAllText(jsonPath);
+            JObject root = JObject.Parse(jsonText);
+
+            GameObject rootGo = BuildNode(root, null);
+
+            var bindings = new Dictionary<string, GameObject>();
+            CollectBindings(root, rootGo, bindings);
+
+            if (!string.IsNullOrEmpty(rootScriptTypeName))
+            {
+                AttachScriptAndBindFields(rootGo, rootScriptTypeName, bindings);
+            }
+
+            string fullPrefabPath = prefabPath.EndsWith(".prefab") ? prefabPath : prefabPath + ".prefab";
+            string dir = Path.GetDirectoryName(fullPrefabPath);
+            if (!string.IsNullOrEmpty(dir) && !AssetDatabase.IsValidFolder(dir))
+            {
+                CreateFolderRecursive(dir);
+            }
+
+            // Phase 1: 写出基础 Prefab（层级 + RectTransform + 组件 + 根脚本字段绑定）。
+            GameObject savedPrefab = PrefabUtility.SaveAsPrefabAsset(rootGo, fullPrefabPath, out bool success);
+            UnityEngine.Object.DestroyImmediate(rootGo);
+
+            if (!success)
+            {
+                throw new Exception($"保存 Prefab 失败: {fullPrefabPath}");
+            }
+
+            // Phase 2: 通过 AssetDatabase.LoadAssetAtPath 重新加载为真正的磁盘资产，
+            // 直接在这个资产对象上用 AddComponent / SerializedObject 打补丁，
+            // 再用 PrefabUtility.SavePrefabAsset（不是 SaveAsPrefabAsset）落盘。
+            // 这是 Unity 官方推荐的"修改已存在 Prefab 资产序列化字段"的方式，
+            // 之前用 EditPrefabContentsScope 重新进入编辑模式的方案有状态没对齐，改用这个更直接的路径。
+            PostProcessSavedPrefabAsset(root, fullPrefabPath);
+
+            Debug.Log($"[LRUnityLayoutPrefabGenerator] 生成完成: {fullPrefabPath}，字段绑定 {bindings.Count} 个");
+            return fullPrefabPath;
+        }
+
+        static void CreateFolderRecursive(string path)
+        {
+            string[] parts = path.Split('/');
+            string current = parts[0];
+            for (int i = 1; i < parts.Length; i++)
+            {
+                string next = current + "/" + parts[i];
+                if (!AssetDatabase.IsValidFolder(next))
+                {
+                    AssetDatabase.CreateFolder(current, parts[i]);
+                }
+                current = next;
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Node construction
+        // ------------------------------------------------------------------
+
+        static GameObject BuildNode(JObject node, Transform parent)
+        {
+            string prefabAssetPath = (string)node["prefabAssetPath"];
+            if (!string.IsNullOrEmpty(prefabAssetPath))
+            {
+                return InstantiatePrefabAsset(node, parent, prefabAssetPath);
+            }
+
+            string name = (string)node["name"] ?? "UnnamedNode";
+            var go = new GameObject(name, typeof(RectTransform));
+            if (parent != null)
+            {
+                go.transform.SetParent(parent, false);
+            }
+
+            ApplyRectTransform(go.GetComponent<RectTransform>(), node);
+
+            string component = (string)node["component"];
+            if (!string.IsNullOrEmpty(component))
+            {
+                ComponentRecipes.Apply(go, component, node);
+            }
+
+            // 处理 data-lr-component: 显式指定额外挂载的 LR 自定义组件（如 Cell 脚本）
+            string lrComponent = (string)node["lrComponent"];
+            if (!string.IsNullOrEmpty(lrComponent))
+            {
+                ComponentRecipes.AddLRComponentPublic(go, lrComponent);
+            }
+
+            var childrenToken = node["children"] as JArray;
+            if (childrenToken != null)
+            {
+                foreach (JObject child in childrenToken.OfType<JObject>())
+                {
+                    BuildChildOrPrefabRef(child, go.transform);
+                }
+            }
+
+            return go;
+        }
+
+        static void BuildChildOrPrefabRef(JObject child, Transform parent)
+        {
+            string prefabChildPath = (string)child["prefabChildPath"];
+            if (!string.IsNullOrEmpty(prefabChildPath))
+            {
+                // Edits an existing node inside the parent's already-instantiated
+                // recipe hierarchy (e.g. list.single-scroll's Viewport/Content);
+                // it does not create a new GameObject.
+                Transform existing = parent.Find(prefabChildPath);
+                if (existing == null)
+                {
+                    Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] data-prefab-child-path 未找到: {prefabChildPath} (parent={parent.name})");
+                    return;
+                }
+
+                string childName = (string)child["name"];
+                if (!string.IsNullOrEmpty(childName))
+                {
+                    existing.name = childName;
+                }
+
+                var nested = child["children"] as JArray;
+                if (nested != null)
+                {
+                    foreach (JObject grandChild in nested.OfType<JObject>())
+                    {
+                        BuildChildOrPrefabRef(grandChild, existing);
+                    }
+                }
+                return;
+            }
+
+            BuildNode(child, parent);
+        }
+
+        static GameObject InstantiatePrefabAsset(JObject node, Transform parent, string prefabAssetPath)
+        {
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabAssetPath);
+            if (prefab == null)
+            {
+                throw new Exception($"data-prefab-asset-path 指向的 Prefab 不存在: {prefabAssetPath}");
+            }
+
+            GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
+            string name = (string)node["name"];
+            if (!string.IsNullOrEmpty(name))
+            {
+                instance.name = name;
+            }
+
+            var rect = instance.GetComponent<RectTransform>();
+            if (rect != null)
+            {
+                ApplyRectTransform(rect, node);
+            }
+            return instance;
+        }
+
+        static void ApplyRectTransform(RectTransform rect, JObject node)
+        {
+            var anchorMin = ReadVector2(node["anchorMin"]);
+            var anchorMax = ReadVector2(node["anchorMax"]);
+            var anchors = ReadVector4(node["anchors"]);
+            if (anchors.HasValue)
+            {
+                rect.anchorMin = new Vector2(anchors.Value.x, anchors.Value.y);
+                rect.anchorMax = new Vector2(anchors.Value.z, anchors.Value.w);
+            }
+            else
+            {
+                if (anchorMin.HasValue) rect.anchorMin = anchorMin.Value;
+                if (anchorMax.HasValue) rect.anchorMax = anchorMax.Value;
+            }
+
+            var pivot = ReadVector2(node["pivot"]);
+            if (pivot.HasValue)
+            {
+                rect.pivot = pivot.Value;
+            }
+
+            var pos = ReadVector2(node["pos"]);
+            if (pos.HasValue)
+            {
+                rect.anchoredPosition = pos.Value;
+            }
+
+            var size = ReadVector2(node["size"]);
+            if (size.HasValue)
+            {
+                rect.sizeDelta = size.Value;
+            }
+        }
+
+        static Vector2? ReadVector2(JToken token)
+        {
+            if (token is JArray arr && arr.Count >= 2)
+            {
+                return new Vector2((float)arr[0], (float)arr[1]);
+            }
+            return null;
+        }
+
+        static Vector4? ReadVector4(JToken token)
+        {
+            if (token is JArray arr && arr.Count >= 4)
+            {
+                return new Vector4((float)arr[0], (float)arr[1], (float)arr[2], (float)arr[3]);
+            }
+            return null;
+        }
+
+        static Color? ReadColor(JToken token)
+        {
+            if (token is JArray arr && arr.Count >= 4)
+            {
+                return new Color((float)arr[0], (float)arr[1], (float)arr[2], (float)arr[3]);
+            }
+            return null;
+        }
+
+        // ------------------------------------------------------------------
+        // Field binding
+        // ------------------------------------------------------------------
+
+        static void CollectBindings(JObject node, GameObject go, Dictionary<string, GameObject> bindings)
+        {
+            string field = (string)node["field"];
+            if (!string.IsNullOrEmpty(field))
+            {
+                bindings[field] = go;
+            }
+
+            var childrenToken = node["children"] as JArray;
+            if (childrenToken == null)
+            {
+                return;
+            }
+
+            // GameObject children were created in the same order as the JSON
+            // children array by BuildNode/BuildChildOrPrefabRef, except that
+            // prefab-child-path entries reuse an existing Transform found by
+            // name rather than appending a new one. Re-resolve by data-name
+            // to stay correct regardless of ordering.
+            foreach (JObject child in childrenToken.OfType<JObject>())
+            {
+                string childName = (string)child["name"];
+                Transform childTransform = string.IsNullOrEmpty(childName) ? null : FindDescendantByName(go.transform, childName);
+                if (childTransform != null)
+                {
+                    CollectBindings(child, childTransform.gameObject, bindings);
+                }
+            }
+        }
+
+        static Transform FindDescendantByName(Transform root, string name)
+        {
+            foreach (Transform child in root)
+            {
+                if (child.name == name)
+                {
+                    return child;
+                }
+            }
+            // fall back to recursive search (covers prefab-child-path nodes
+            // that live deeper than one level, e.g. Viewport/Content)
+            foreach (Transform child in root)
+            {
+                Transform found = FindDescendantByName(child, name);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+            return null;
+        }
+
+        static void AttachScriptAndBindFields(GameObject rootGo, string scriptTypeName, Dictionary<string, GameObject> bindings)
+        {
+            Type scriptType = FindType(scriptTypeName);
+            if (scriptType == null)
+            {
+                Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] 未找到脚本类型: {scriptTypeName}，跳过挂载和绑定");
+                return;
+            }
+
+            Component component = rootGo.GetComponent(scriptType);
+            if (component == null)
+            {
+                component = rootGo.AddComponent(scriptType);
+            }
+
+            foreach (var kv in bindings)
+            {
+                FieldBinder.BindField(component, kv.Key, kv.Value);
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Post-processing: configure special components (SingleScrollView, Localizer, etc.)
+        //
+        // Key fix: Phase 1 (GenerateFromLayout above) writes the base prefab via
+        // PrefabUtility.SaveAsPrefabAsset(tempGameObject, path) -- that call takes an
+        // in-memory scene object and snapshots it to a new prefab file. It is NOT the
+        // same as "the prefab asset". To reliably add components / set fields on an
+        // *existing* prefab asset afterwards, the correct sequence is:
+        //   1. AssetDatabase.LoadAssetAtPath<GameObject>(path) -- get the real asset object
+        //   2. Mutate it directly (AddComponent, SerializedObject+ApplyModifiedProperties)
+        //   3. PrefabUtility.SavePrefabAsset(loadedAsset) -- NOT SaveAsPrefabAsset again
+        // This mirrors the standard Editor-scripting workflow for patching prefab
+        // serialized fields and is what actually persists to disk.
+        // ------------------------------------------------------------------
+
+        static void PostProcessSavedPrefabAsset(JObject jsonRoot, string prefabPath)
+        {
+            GameObject prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            if (prefabAsset == null)
+            {
+                Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] 无法加载 Prefab 资产用于后处理: {prefabPath}");
+                return;
+            }
+
+            int localizerCount = 0;
+            int scrollViewCount = 0;
+            PostProcessNode(jsonRoot, prefabAsset, ref localizerCount, ref scrollViewCount);
+
+            EditorUtility.SetDirty(prefabAsset);
+            PrefabUtility.SavePrefabAsset(prefabAsset);
+            AssetDatabase.SaveAssets();
+
+            Debug.Log($"[LRUnityLayoutPrefabGenerator] 后处理完成: {prefabPath}，Localizer +{localizerCount}，SingleScrollView 配置 {scrollViewCount} 个");
+        }
+
+        static void PostProcessNode(JObject node, GameObject go, ref int localizerCount, ref int scrollViewCount)
+        {
+            string component = (string)node["component"];
+            string field = (string)node["field"];
+
+            // text.localized 且无字段绑定 -> 挂 Localizer（有字段绑定的由 C# 脚本读写文本，不挂）
+            if (component == "text.localized" && string.IsNullOrEmpty(field))
+            {
+                Type localizerType = FindType("LR.Localizer");
+                if (localizerType != null && go.GetComponent(localizerType) == null)
+                {
+                    Component localizer = go.AddComponent(localizerType);
+
+                    // 设置 m_Key 字段：格式为 UI_<PageName>_<NodeName>
+                    string pageName = GetPageNameFromRoot(go);
+                    string nodeName = (string)node["name"];
+                    if (!string.IsNullOrEmpty(pageName) && !string.IsNullOrEmpty(nodeName))
+                    {
+                        string key = $"UI_{pageName}_{nodeName}";
+                        var serializedObject = new SerializedObject(localizer);
+                        serializedObject.Update();
+                        var keyProp = serializedObject.FindProperty("m_Key");
+                        if (keyProp != null)
+                        {
+                            keyProp.stringValue = key;
+                            serializedObject.ApplyModifiedProperties();
+                        }
+                    }
+
+                    localizerCount++;
+                }
+            }
+
+            // list.single-scroll -> 配置 CellTemplate/CellWidth/CellHeight
+            if (component == "list.single-scroll")
+            {
+                if (ConfigureSingleScrollView(node, go))
+                {
+                    scrollViewCount++;
+                }
+            }
+
+            var childrenToken = node["children"] as JArray;
+            if (childrenToken == null)
+            {
+                return;
+            }
+
+            foreach (JObject childNode in childrenToken.OfType<JObject>())
+            {
+                // prefabChildPath 节点不是新建的 GameObject，只是已有子路径的挂载点指示；
+                // 它自己不需要后处理，但要继续深入它的 children（真正的模板节点在里面）。
+                string prefabChildPath = (string)childNode["prefabChildPath"];
+                if (!string.IsNullOrEmpty(prefabChildPath))
+                {
+                    Transform targetParent = go.transform.Find(prefabChildPath);
+                    if (targetParent == null)
+                    {
+                        continue;
+                    }
+
+                    var grandChildren = childNode["children"] as JArray;
+                    if (grandChildren == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (JObject grandChild in grandChildren.OfType<JObject>())
+                    {
+                        string grandChildName = (string)grandChild["name"];
+                        if (string.IsNullOrEmpty(grandChildName))
+                        {
+                            continue;
+                        }
+
+                        Transform grandChildTransform = targetParent.Find(grandChildName);
+                        if (grandChildTransform != null)
+                        {
+                            PostProcessNode(grandChild, grandChildTransform.gameObject, ref localizerCount, ref scrollViewCount);
+                        }
+                    }
+                    continue;
+                }
+
+                string childName = (string)childNode["name"];
+                if (string.IsNullOrEmpty(childName))
+                {
+                    continue;
+                }
+
+                Transform childTransform = go.transform.Find(childName);
+                if (childTransform != null)
+                {
+                    PostProcessNode(childNode, childTransform.gameObject, ref localizerCount, ref scrollViewCount);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Configures m_CellTemplate / m_CellWidth / m_CellHeight on a list.single-scroll
+        /// node's ScrollView component via SerializedObject, per the standard pattern:
+        /// SerializedObject -> FindProperty -> set value -> ApplyModifiedProperties.
+        /// Returns true if a template was found and fields were applied.
+        /// </summary>
+        static bool ConfigureSingleScrollView(JObject node, GameObject go)
+        {
+            Component scrollView = go.GetComponent("LR.SingleScrollView");
+            if (scrollView == null)
+            {
+                scrollView = go.GetComponent<ScrollRect>();
+            }
+
+            if (scrollView == null)
+            {
+                Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] list.single-scroll 节点 {go.name} 没有找到 ScrollView 组件");
+                return false;
+            }
+
+            Transform templateTransform = FindCellTemplateTransform(node, go.transform);
+            if (templateTransform == null)
+            {
+                Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] SingleScrollView {go.name}: 未找到带 Template 字段的模板节点");
+                return false;
+            }
+
+            var templateRect = templateTransform.GetComponent<RectTransform>();
+            if (templateRect == null)
+            {
+                return false;
+            }
+
+            int cellWidth = Mathf.RoundToInt(templateRect.sizeDelta.x);
+            int cellHeight = Mathf.RoundToInt(templateRect.sizeDelta.y);
+
+            var serializedObject = new SerializedObject(scrollView);
+            serializedObject.Update();
+
+            var templateProp = serializedObject.FindProperty("m_CellTemplate");
+            var widthProp = serializedObject.FindProperty("m_CellWidth");
+            var heightProp = serializedObject.FindProperty("m_CellHeight");
+
+            if (templateProp == null || widthProp == null || heightProp == null)
+            {
+                Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] SingleScrollView {go.name}: 未找到 m_CellTemplate/m_CellWidth/m_CellHeight 序列化字段");
+                return false;
+            }
+
+            templateProp.objectReferenceValue = templateTransform.gameObject;
+            widthProp.intValue = cellWidth;
+            heightProp.intValue = cellHeight;
+            serializedObject.ApplyModifiedProperties();
+
+            Debug.Log($"[LRUnityLayoutPrefabGenerator] 配置 SingleScrollView {go.name}: CellTemplate={templateTransform.name}, CellWidth={cellWidth}, CellHeight={cellHeight}");
+            return true;
+        }
+
+        /// <summary>
+        /// Walks a list.single-scroll JSON node's children in lockstep with the real
+        /// Transform hierarchy, looking for the first descendant whose data-field name
+        /// contains "Template", and returns its actual Transform.
+        ///
+        /// Important: a data-prefab-child-path wrapper (e.g. "Viewport/Content") does
+        /// not create a new GameObject -- BuildChildOrPrefabRef finds the *existing*
+        /// child at that path and renames it to the wrapper's own data-name (see
+        /// GrowthFundPage.tsx's "ViewportContentAnchor" wrapping "Viewport/Content").
+        /// So the on-disk name is the wrapper's JSON name, not the literal path segment
+        /// ("Content") -- we must resolve child GameObjects by name, not assume a fixed
+        /// path string.
+        /// </summary>
+        static Transform FindCellTemplateTransform(JObject node, Transform current)
+        {
+            var childrenToken = node["children"] as JArray;
+            if (childrenToken == null)
+            {
+                return null;
+            }
+
+            foreach (JObject child in childrenToken.OfType<JObject>())
+            {
+                string prefabChildPath = (string)child["prefabChildPath"];
+                if (!string.IsNullOrEmpty(prefabChildPath))
+                {
+                    // prefabChildPath (e.g. "Viewport/Content") is the ORIGINAL path used
+                    // to locate the existing child; BuildChildOrPrefabRef then renamed that
+                    // found Transform to the wrapper's own JSON "name". So: resolve the
+                    // parent-chain portion of the path normally, then look for the child
+                    // under it by either the new (post-rename) name or the original last
+                    // path segment (covers the case where no rename happened, e.g. name
+                    // matched already, or this wrapper has no "name").
+                    int lastSlash = prefabChildPath.LastIndexOf('/');
+                    string parentPath = lastSlash >= 0 ? prefabChildPath.Substring(0, lastSlash) : null;
+                    string originalLeafName = lastSlash >= 0 ? prefabChildPath.Substring(lastSlash + 1) : prefabChildPath;
+
+                    Transform parentTransform = string.IsNullOrEmpty(parentPath) ? current : current.Find(parentPath);
+                    if (parentTransform == null)
+                    {
+                        continue;
+                    }
+
+                    string wrapperName = (string)child["name"];
+                    Transform wrapperTransform = (!string.IsNullOrEmpty(wrapperName) ? parentTransform.Find(wrapperName) : null)
+                        ?? parentTransform.Find(originalLeafName);
+                    if (wrapperTransform == null)
+                    {
+                        continue;
+                    }
+
+                    Transform found = FindCellTemplateTransform(child, wrapperTransform);
+                    if (found != null)
+                    {
+                        return found;
+                    }
+                    continue;
+                }
+
+                string childName = (string)child["name"];
+                if (string.IsNullOrEmpty(childName))
+                {
+                    continue;
+                }
+
+                Transform childTransform = current.Find(childName);
+                if (childTransform == null)
+                {
+                    continue;
+                }
+
+                string fieldName = (string)child["field"];
+                if (!string.IsNullOrEmpty(fieldName) && fieldName.Contains("Template"))
+                {
+                    return childTransform;
+                }
+
+                Transform foundInGrandChildren = FindCellTemplateTransform(child, childTransform);
+                if (foundInGrandChildren != null)
+                {
+                    return foundInGrandChildren;
+                }
+            }
+
+            return null;
+        }
+
+        static Type FindType(string fullName)
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type t = assembly.GetType(fullName);
+                if (t != null)
+                {
+                    return t;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 从 GameObject 向上查找根节点，提取 Page 名称（去掉 "Page" 后缀）。
+        /// 例如：GrowthFundPage -> GrowthFund
+        /// </summary>
+        static string GetPageNameFromRoot(GameObject go)
+        {
+            Transform root = go.transform.root;
+            string rootName = root.name;
+            if (rootName.EndsWith("Page"))
+            {
+                return rootName.Substring(0, rootName.Length - 4);
+            }
+            return rootName;
+        }
+    }
+}
