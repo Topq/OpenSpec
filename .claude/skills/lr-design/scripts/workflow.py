@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from feishu_api import FeishuAPI, FeishuAPIError
 from document_converter import DocumentConverter, DocumentMetadata
-from manage_session import create_session
+from manage_session import clean_all_sessions, create_session
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,6 +46,10 @@ def download_document(api: FeishuAPI, converter: DocumentConverter,
                       session_root: Path, url: str, session_name: str) -> Path:
     """下载飞书文档到本地会话目录,返回 working.md 路径"""
     print("正在下载策划案...")
+
+    cleaned = clean_all_sessions(session_root)
+    if cleaned:
+        print(f"已清空 {cleaned} 个历史会话目录，避免跨任务污染")
 
     session_dir = create_session(session_root, session_name)
     print(f"会话目录: {session_dir}")

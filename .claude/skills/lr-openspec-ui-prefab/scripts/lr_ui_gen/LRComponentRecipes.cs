@@ -17,24 +17,21 @@ namespace LRUIPrefabGen
     {
         // Global default text style (unity-ui-components.md "全局默认样式").
         const string DefaultFont = "Assets/Resources/Font/fzhjtSDF.asset";
-        const string DefaultTextMaterial = "Assets/Resources/Font/fzhjtSDF_UI_Default.mat";
-        const float DefaultFontSize = 32f;  // 调研报告：实际项目中默认32号字体，不是24
 
         public static void Apply(GameObject go, string componentId, JObject node)
         {
             // 处理样式变体（如 text.localized 的 title/body 样式）
+            // 注意：JSON 布局节点里的键名是 "textStyle"（tsx_to_json.py 把 TSX 的
+            // data-lr-style 属性转换成这个键），不是 "data-lr-style" 原始属性名。
             string semanticId = componentId;
-            if (node != null && node["data-lr-style"] != null)
+            string style = (string)node?["textStyle"];
+            if (!string.IsNullOrEmpty(style))
             {
-                string style = (string)node["data-lr-style"];
-                if (!string.IsNullOrEmpty(style))
+                // 尝试加载 componentId-style 配方（如 text.localized-title）
+                var variantRecipe = ComponentRecipeLoader.Get($"{componentId}-{style}");
+                if (variantRecipe != null)
                 {
-                    // 尝试加载 componentId-style 配方（如 text.localized-title）
-                    var variantRecipe = ComponentRecipeLoader.Get($"{componentId}-{style}");
-                    if (variantRecipe != null)
-                    {
-                        semanticId = $"{componentId}-{style}";
-                    }
+                    semanticId = $"{componentId}-{style}";
                 }
             }
 
@@ -46,364 +43,10 @@ namespace LRUIPrefabGen
                 return;
             }
 
-            // Fallback 到硬编码 switch（旧架构，逐步迁移）
-            switch (componentId)
-            {
-                case "surface.panel":
-                case "surface.page":
-                    // RectTransform only; children carry the actual visuals.
-                    break;
-
-                case "surface.modal":
-                    go.AddComponent<CanvasGroup>();
-                    break;
-
-                case "control.button":
-                    ApplyButton(go, node);
-                    break;
-
-                case "control.toggle":
-                    go.AddComponent<Toggle>();
-                    AddRaycastArea(go);
-                    break;
-
-                case "control.input":
-                    ApplyInput(go, node);
-                    break;
-
-                case "control.progress":
-                    AddLRComponent(go, "LR.LRProgressBar");
-                    break;
-
-                case "list.scroll":
-                    ApplyScrollView(go, node, "LR.ScrollView");
-                    break;
-
-                case "list.single-scroll":
-                    ApplyScrollView(go, node, "LR.SingleScrollView");
-                    break;
-
-                case "content.async-image":
-                    ApplyImage(go, node, raycastTarget: false);
-                    AddLRComponent(go, "LR.AsyncTexture");
-                    break;
-
-                case "content.async-icon":
-                    ApplyImage(go, node, raycastTarget: false);
-                    AddLRComponent(go, "LR.AsyncTexture");
-                    break;
-
-                case "text.localized":
-                    ApplyLocalizedText(go, node);
-                    break;
-
-                case "slot.item-icon":
-                    // Standard item-icon hierarchy is business-bound later;
-                    // generator only creates the RectTransform placeholder.
-                    break;
-
-                case "feedback.red-point":
-                    AddLRComponent(go, "LR.UIRedPointWatcher");
-                    break;
-
-                case "template.tab-item":
-                case "template.reward-cell":
-                    // Pure layout template; no component beyond RectTransform.
-                    break;
-
-                default:
-                    Debug.LogWarning($"[LRComponentRecipes] 未识别的语义组件 ID: {componentId}（GameObject={go.name}），只创建了 RectTransform");
-                    break;
-            }
-
+            // 所有白名单语义 ID 现在都有 JSON 配方（见 ComponentRecipes/*.json），
+            // 走不到这里就说明 ID 未识别或配方加载失败。
+            Debug.LogWarning($"[LRComponentRecipes] 未识别的语义组件 ID: {componentId}（GameObject={go.name}），只创建了 RectTransform");
             ApplyLayoutGroup(go, node);
-        }
-
-        static void ApplyButton(GameObject go, JObject node)
-        {
-            var image = go.AddComponent<Image>();
-            // 调研报告: Button 的 Image 关闭 raycastTarget，点击响应由 RaycastArea 子节点负责
-            image.raycastTarget = false;
-            // unity-ui-components.md control.button 默认样式: image.type = Sliced（九宫格，支持拉伸）。
-            image.type = Image.Type.Sliced;
-
-            // 按钮默认图（调研报告：按钮通常设置默认 sprite）
-            string nodeName = (string)node["name"];
-            string defaultSpritePath = GetDefaultSpriteForButton(nodeName);
-            if (!string.IsNullOrEmpty(defaultSpritePath))
-            {
-                image.sprite = LoadAsset<Sprite>(defaultSpritePath);
-            }
-
-            var button = go.AddComponent<Button>();
-            button.targetGraphic = image;
-
-            // Only auto-generate the label from data-text when the author
-            // did not supply explicit JSX children. When a label needs its
-            // own [SerializeField] binding (e.g. m_BuyButtonText), it must
-            // be authored as an explicit text.localized child instead --
-            // an auto-generated child has no JSON node, so CollectBindings
-            // (which matches by data-name in the JSON tree) could never
-            // find it.
-            bool hasExplicitChildren = node["children"] is JArray childrenArr && childrenArr.Count > 0;
-            string text = (string)node["text"];
-            if (!hasExplicitChildren && !string.IsNullOrEmpty(text))
-            {
-                GameObject textGo = new GameObject("Text", typeof(RectTransform));
-                textGo.transform.SetParent(go.transform, false);
-                var rect = textGo.GetComponent<RectTransform>();
-                rect.anchorMin = Vector2.zero;
-                rect.anchorMax = Vector2.one;
-                rect.sizeDelta = Vector2.zero;
-                rect.anchoredPosition = Vector2.zero;
-
-                var tmp = textGo.AddComponent<TextMeshProUGUI>();
-                tmp.text = text;
-                tmp.fontSize = DefaultFontSize;
-                tmp.alignment = TextAlignmentOptions.Center;
-                tmp.fontSharedMaterial = LoadAsset<Material>("Assets/Resources/Font/fzhjtSDF_UI_OutLine1Px.mat");
-                tmp.color = Color.white;
-            }
-
-            // 调研报告规则: Button 必须添加 RaycastArea 子节点负责点击响应
-            GameObject raycastAreaGo = new GameObject("RaycastArea", typeof(RectTransform));
-            raycastAreaGo.transform.SetParent(go.transform, false);
-            var raycastRect = raycastAreaGo.GetComponent<RectTransform>();
-            raycastRect.anchorMin = Vector2.zero;
-            raycastRect.anchorMax = Vector2.one;
-            raycastRect.sizeDelta = Vector2.zero;
-            raycastRect.anchoredPosition = Vector2.zero;
-            AddLRComponent(raycastAreaGo, "LR.RaycastArea");
-        }
-
-        static void ApplyInput(GameObject go, JObject node)
-        {
-            var image = go.AddComponent<Image>();
-            var inputField = go.AddComponent<TMP_InputField>();
-
-            GameObject textArea = new GameObject("TextArea", typeof(RectTransform));
-            textArea.transform.SetParent(go.transform, false);
-            var textAreaRect = textArea.GetComponent<RectTransform>();
-            textAreaRect.anchorMin = Vector2.zero;
-            textAreaRect.anchorMax = Vector2.one;
-            textAreaRect.sizeDelta = Vector2.zero;
-
-            GameObject textGo = new GameObject("Text", typeof(RectTransform));
-            textGo.transform.SetParent(textArea.transform, false);
-            var tmp = textGo.AddComponent<TextMeshProUGUI>();
-            tmp.fontSize = 20f;
-            tmp.color = Color.white;
-            tmp.font = LoadAsset<TMP_FontAsset>("Assets/Resources/Font/ssfttSDF.asset");
-            tmp.fontSharedMaterial = LoadAsset<Material>("Assets/Resources/Font/ssfttSDF_UI_NoOutLine.mat");
-
-            inputField.textViewport = textAreaRect;
-            inputField.textComponent = tmp;
-
-            string placeholder = (string)node["placeholder"];
-            GameObject placeholderGo = new GameObject("Placeholder", typeof(RectTransform));
-            placeholderGo.transform.SetParent(textArea.transform, false);
-            var placeholderTmp = placeholderGo.AddComponent<TextMeshProUGUI>();
-            placeholderTmp.text = string.IsNullOrEmpty(placeholder) ? "请输入..." : placeholder;
-            placeholderTmp.fontSize = 20f;
-            placeholderTmp.color = new Color(0.5f, 0.5f, 0.5f, 1f);
-            placeholderTmp.font = tmp.font;
-            placeholderTmp.fontSharedMaterial = tmp.fontSharedMaterial;
-            inputField.placeholder = placeholderTmp;
-        }
-
-        static void ApplyScrollView(GameObject go, JObject node, string lrScrollTypeName)
-        {
-            // LR.ScrollView / LR.SingleScrollView derive from ScrollRect
-            // (ScrollView : ScrollRect), they don't sit alongside a plain
-            // ScrollRect as a sibling component -- Unity only allows one
-            // ScrollRect-derived component per GameObject. Add the LR type
-            // directly and treat the returned Component as the ScrollRect.
-            Type lrType = FindType(lrScrollTypeName);
-            ScrollRect scrollRect;
-            if (lrType != null && typeof(ScrollRect).IsAssignableFrom(lrType))
-            {
-                scrollRect = (ScrollRect)go.AddComponent(lrType);
-            }
-            else
-            {
-                Debug.LogWarning($"[LRComponentRecipes] 未找到类型或不是 ScrollRect 派生类: {lrScrollTypeName}（GameObject={go.name}），退化为普通 ScrollRect");
-                scrollRect = go.AddComponent<ScrollRect>();
-            }
-
-            GameObject viewport = new GameObject("Viewport", typeof(RectTransform));
-            viewport.transform.SetParent(go.transform, false);
-            var viewportRect = viewport.GetComponent<RectTransform>();
-            viewportRect.anchorMin = Vector2.zero;
-            viewportRect.anchorMax = Vector2.one;
-            viewportRect.sizeDelta = Vector2.zero;
-            viewport.AddComponent<RectMask2D>();
-
-            GameObject content = new GameObject("Content", typeof(RectTransform));
-            content.transform.SetParent(viewport.transform, false);
-            var contentRect = content.GetComponent<RectTransform>();
-            contentRect.anchorMin = new Vector2(0f, 1f);
-            contentRect.anchorMax = new Vector2(1f, 1f);
-            contentRect.pivot = new Vector2(0.5f, 1f);
-
-            scrollRect.viewport = viewportRect;
-            scrollRect.content = contentRect;
-            scrollRect.horizontal = false;
-            scrollRect.vertical = true;
-            scrollRect.movementType = ScrollRect.MovementType.Elastic;
-            // unity-ui-components.md list.scroll/list.single-scroll 默认样式: scrollSensitivity=1.0, scrollbar=AutoHide。
-            scrollRect.scrollSensitivity = 1.0f;
-
-            Scrollbar verticalScrollbar = BuildVerticalScrollbar(go.transform);
-            scrollRect.verticalScrollbar = verticalScrollbar;
-            scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
-        }
-
-        static Scrollbar BuildVerticalScrollbar(Transform parent)
-        {
-            GameObject scrollbarGo = new GameObject("Scrollbar Vertical", typeof(RectTransform));
-            scrollbarGo.transform.SetParent(parent, false);
-            var scrollbarRect = scrollbarGo.GetComponent<RectTransform>();
-            scrollbarRect.anchorMin = new Vector2(1f, 0f);
-            scrollbarRect.anchorMax = new Vector2(1f, 1f);
-            scrollbarRect.pivot = new Vector2(1f, 1f);
-            scrollbarRect.sizeDelta = new Vector2(12f, 0f);
-
-            var scrollbarImage = scrollbarGo.AddComponent<Image>();
-            scrollbarImage.color = new Color(0f, 0f, 0f, 0.25f);
-            var scrollbar = scrollbarGo.AddComponent<Scrollbar>();
-            scrollbar.direction = Scrollbar.Direction.BottomToTop;
-
-            GameObject slidingArea = new GameObject("Sliding Area", typeof(RectTransform));
-            slidingArea.transform.SetParent(scrollbarGo.transform, false);
-            var slidingRect = slidingArea.GetComponent<RectTransform>();
-            slidingRect.anchorMin = Vector2.zero;
-            slidingRect.anchorMax = Vector2.one;
-            slidingRect.sizeDelta = Vector2.zero;
-
-            GameObject handle = new GameObject("Handle", typeof(RectTransform));
-            handle.transform.SetParent(slidingArea.transform, false);
-            var handleRect = handle.GetComponent<RectTransform>();
-            handleRect.sizeDelta = new Vector2(12f, 12f);
-            var handleImage = handle.AddComponent<Image>();
-            handleImage.color = new Color(1f, 1f, 1f, 0.6f);
-
-            scrollbar.handleRect = handleRect;
-            scrollbar.targetGraphic = handleImage;
-            return scrollbar;
-        }
-
-        static void ApplyImage(GameObject go, JObject node, bool raycastTarget)
-        {
-            var image = go.AddComponent<Image>();
-            // 调研报告: Image 默认关闭 raycastTarget（除非明确需要响应点击）
-            image.raycastTarget = raycastTarget;
-            image.preserveAspect = true;
-
-            var colorArr = node["color"] as JArray;
-            if (colorArr != null && colorArr.Count >= 4)
-            {
-                image.color = new Color((float)colorArr[0], (float)colorArr[1], (float)colorArr[2], (float)colorArr[3]);
-            }
-
-            // 根据节点名称判断职能，设置默认 sprite（调研报告：大部分 Image 在 prefab 中都设置了默认图）
-            string nodeName = (string)node["name"];
-            string defaultSpritePath = GetDefaultSpriteForImage(nodeName);
-            if (!string.IsNullOrEmpty(defaultSpritePath))
-            {
-                image.sprite = LoadAsset<Sprite>(defaultSpritePath);
-            }
-        }
-
-        static void ApplyLocalizedText(GameObject go, JObject node)
-        {
-            var tmp = go.AddComponent<TextMeshProUGUI>();
-
-            // Localizer 的挂载（对无 data-field 的静态文本节点）由生成流程的后处理阶段
-            // 统一负责：LRUnityLayoutPrefabGenerator.PostProcessSavedPrefabAsset 在 Prefab
-            // 保存为磁盘资产后，通过 AssetDatabase.LoadAssetAtPath 重新加载再挂载，
-            // 这样才能确保序列化生效，这里不重复处理。
-
-            string style = (string)node["textStyle"];
-            ApplyTextStylePreset(tmp, style);
-
-            string text = (string)node["text"];
-            if (!string.IsNullOrEmpty(text))
-            {
-                tmp.text = text;
-            }
-
-            var colorArr = node["color"] as JArray;
-            if (colorArr != null && colorArr.Count >= 4)
-            {
-                tmp.color = new Color((float)colorArr[0], (float)colorArr[1], (float)colorArr[2], (float)colorArr[3]);
-            }
-
-            ApplyTextAlignment(tmp, node);
-        }
-
-        static void ApplyTextStylePreset(TextMeshProUGUI tmp, string style)
-        {
-            // 统一使用 fzhjtSDF_UI_Default.mat，不再区分 title/body 的材质
-            tmp.font = LoadAsset<TMP_FontAsset>(DefaultFont);
-            tmp.fontSharedMaterial = LoadAsset<Material>(DefaultTextMaterial);
-
-            switch (style)
-            {
-                case "title":
-                    tmp.fontSize = 32f;
-                    tmp.color = new Color(1f, 0.843f, 0f, 1f);
-                    tmp.alignment = TextAlignmentOptions.Center;
-                    break;
-
-                case "body":
-                    tmp.fontSize = 20f;
-                    tmp.color = new Color(0.878f, 0.878f, 0.878f, 1f);
-                    tmp.alignment = TextAlignmentOptions.Left;
-                    break;
-
-                default:
-                    tmp.fontSize = DefaultFontSize;
-                    tmp.color = Color.white;
-                    tmp.alignment = TextAlignmentOptions.Left;
-                    break;
-            }
-        }
-
-        static void ApplyTextAlignment(TextMeshProUGUI tmp, JObject node)
-        {
-            string textAlign = (string)node["textAlign"];
-            string verticalAlign = (string)node["verticalAlign"];
-            if (string.IsNullOrEmpty(textAlign) && string.IsNullOrEmpty(verticalAlign))
-            {
-                return;
-            }
-
-            HorizontalAlignmentOptions h = ParseHorizontal(textAlign, tmp.alignment);
-            VerticalAlignmentOptions v = ParseVertical(verticalAlign, tmp.alignment);
-            tmp.alignment = (TextAlignmentOptions)((int)h | (int)v);
-        }
-
-        static HorizontalAlignmentOptions ParseHorizontal(string value, TextAlignmentOptions fallback)
-        {
-            switch (value)
-            {
-                case "Left": return HorizontalAlignmentOptions.Left;
-                case "Center": return HorizontalAlignmentOptions.Center;
-                case "Right": return HorizontalAlignmentOptions.Right;
-                case "Justified": return HorizontalAlignmentOptions.Justified;
-                default: return (HorizontalAlignmentOptions)((int)fallback & 0xF);
-            }
-        }
-
-        static VerticalAlignmentOptions ParseVertical(string value, TextAlignmentOptions fallback)
-        {
-            switch (value)
-            {
-                case "Top": return VerticalAlignmentOptions.Top;
-                case "Middle": return VerticalAlignmentOptions.Middle;
-                case "Bottom": return VerticalAlignmentOptions.Bottom;
-                default: return (VerticalAlignmentOptions)((int)fallback & 0xF0);
-            }
         }
 
         static void ApplyLayoutGroup(GameObject go, JObject node)
@@ -436,11 +79,6 @@ namespace LRUIPrefabGen
             {
                 group.childAlignment = anchor;
             }
-        }
-
-        static void AddRaycastArea(GameObject go)
-        {
-            AddLRComponent(go, "LR.RaycastArea");
         }
 
         static void AddLRComponent(GameObject go, string fullTypeName)
@@ -484,39 +122,6 @@ namespace LRUIPrefabGen
                 Debug.LogWarning($"[LRComponentRecipes] 未找到资源: {path}");
             }
             return asset;
-        }
-
-        /// <summary>
-        /// 根据 Image 节点名称判断职能，返回对应的默认 sprite 路径。
-        /// 调研报告：背景、按钮、图标等不同职能的 Image 使用不同的默认图。
-        /// </summary>
-        static string GetDefaultSpriteForImage(string nodeName)
-        {
-            if (string.IsNullOrEmpty(nodeName))
-                return null;
-
-            string lowerName = nodeName.ToLower();
-
-            // 背景类：Bg, Background, FundBackground 等
-            if (lowerName.Contains("bg") || lowerName.Contains("background"))
-            {
-                return "Assets/UI/AtlasResources/CommonUI/bg2x2.png";
-            }
-
-            // 图标类：Icon
-            if (lowerName.Contains("icon"))
-            {
-                return "Assets/UI/AtlasResources/FuncMenuListIcon/zjm_icon_07.png";
-            }
-
-            // 装饰/分割线类：Line, Divider
-            if (lowerName.Contains("line") || lowerName.Contains("divider"))
-            {
-                return "Assets/UI/AtlasResources/CommonUI/farme_08.png";
-            }
-
-            // 其他默认返回 null（由代码运行时设置）
-            return null;
         }
 
         /// <summary>
@@ -660,11 +265,62 @@ namespace LRUIPrefabGen
                     case "button":
                         PostProcessButton(go, node);
                         break;
+                    case "async-texture":
+                        PostProcessAsyncTexture(go);
+                        break;
+                    case "single-scroll-view":
+                        PostProcessSingleScrollView(go, node);
+                        break;
+                    case "grid-scroll-view":
+                        PostProcessGridScrollView(go, node);
+                        break;
+                    case "input-field":
+                        PostProcessInputField(go, node);
+                        break;
+                    case "item-slot":
+                        PostProcessItemSlot(go, node);
+                        break;
+                    case "modal":
+                        PostProcessModal(go, node);
+                        break;
+                    case "reward-cell":
+                        PostProcessRewardCell(go, node);
+                        break;
+                    case "tab-item":
+                        PostProcessTabItem(go, node);
+                        break;
                     default:
                         Debug.LogWarning($"[ComponentRecipes] 未知的后处理钩子: {recipe.postProcess}");
                         break;
                 }
             }
+
+            // 5. 应用 JSON layout 节点上的 "text" 字段（如果组件是 TextMeshProUGUI）
+            // 注意：这里检查的是根节点挂载的所有组件，不只是 mainComponent
+            if (recipe.components != null)
+            {
+                foreach (var comp in recipe.components)
+                {
+                    if (comp.type == "TMPro.TextMeshProUGUI")
+                    {
+                        var tmp = go.GetComponent<TextMeshProUGUI>();
+                        if (tmp != null)
+                        {
+                            string textValue = (string)node?["text"];
+                            if (!string.IsNullOrEmpty(textValue))
+                            {
+                                tmp.text = textValue;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // 6. 应用 JSON layout 节点上的 layoutGroup 系列属性（Horizontal/VerticalLayoutGroup）
+            // 注意：这一步之前只在 switch fallback 路径末尾调用，新架构走 ApplyFromRecipe
+            // 直接 return，导致所有已配方化组件都无法应用 data-layout-group 等属性，这里补上。
+            ApplyLayoutGroup(go, node);
         }
 
         static void ApplyLayoutDefaults(RectTransform rectTransform, LayoutDefaults layout)
@@ -733,6 +389,24 @@ namespace LRUIPrefabGen
             if (targetType == typeof(Sprite) && value is string spritePath)
             {
                 return LoadAsset<Sprite>(spritePath);
+            }
+
+            // 处理 Texture/Texture2D 资源路径
+            if ((targetType == typeof(Texture2D) || targetType == typeof(Texture)) && value is string texturePath)
+            {
+                return LoadAsset<Texture2D>(texturePath);
+            }
+
+            // 处理 TMP_FontAsset 资源路径
+            if (targetType == typeof(TMP_FontAsset) && value is string fontPath)
+            {
+                return LoadAsset<TMP_FontAsset>(fontPath);
+            }
+
+            // 处理 Material 资源路径
+            if (targetType == typeof(Material) && value is string materialPath)
+            {
+                return LoadAsset<Material>(materialPath);
             }
 
             // 处理枚举
@@ -836,6 +510,520 @@ namespace LRUIPrefabGen
                     tmp.fontSharedMaterial = LoadAsset<Material>("Assets/Resources/Font/fzhjtSDF_UI_OutLine1Px.mat");
                 }
             }
+        }
+
+        /// <summary>
+        /// AsyncTexture 组件的后处理钩子：绑定 m_RawImage 到同节点的 RawImage 组件
+        /// </summary>
+        static void PostProcessAsyncTexture(GameObject go)
+        {
+            var asyncTexture = go.GetComponent(FindType("LR.AsyncTexture"));
+            var rawImage = go.GetComponent<RawImage>();
+
+            if (asyncTexture == null || rawImage == null)
+            {
+                Debug.LogWarning($"[ComponentRecipes] PostProcessAsyncTexture 失败：GameObject {go.name} 缺少 AsyncTexture 或 RawImage 组件");
+                return;
+            }
+
+            // 使用 SerializedObject 绑定 m_RawImage 字段
+            var serializedObject = new SerializedObject(asyncTexture);
+            serializedObject.Update();
+            var rawImageProp = serializedObject.FindProperty("m_RawImage");
+            if (rawImageProp != null)
+            {
+                rawImageProp.objectReferenceValue = rawImage;
+                serializedObject.ApplyModifiedProperties();
+            }
+            else
+            {
+                Debug.LogWarning($"[ComponentRecipes] PostProcessAsyncTexture: AsyncTexture 上未找到 m_RawImage 字段");
+            }
+        }
+
+        /// <summary>
+        /// SingleScrollView 组件的后处理钩子：创建完整的滚动列表层级结构
+        /// 包括 LR.SingleScrollView（根节点）、Viewport（遮罩）、Content 和 Scrollbar
+        /// </summary>
+        static void PostProcessSingleScrollView(GameObject go, JObject node)
+        {
+            // 1. 添加 LR.SingleScrollView 组件（继承自 ScrollRect）
+            Type singleScrollViewType = FindType("LR.SingleScrollView");
+            ScrollRect scrollRect;
+
+            if (singleScrollViewType != null && typeof(ScrollRect).IsAssignableFrom(singleScrollViewType))
+            {
+                scrollRect = (ScrollRect)go.AddComponent(singleScrollViewType);
+            }
+            else
+            {
+                Debug.LogWarning($"[ComponentRecipes] 未找到 LR.SingleScrollView 类型，退化为普通 ScrollRect");
+                scrollRect = go.AddComponent<ScrollRect>();
+            }
+
+            scrollRect.horizontal = false;
+            scrollRect.vertical = true;
+            scrollRect.scrollSensitivity = 1f;
+            scrollRect.movementType = ScrollRect.MovementType.Elastic;
+
+            // 2. 创建 Viewport（遮罩容器）
+            GameObject viewport = new GameObject("Viewport", typeof(RectTransform));
+            viewport.transform.SetParent(go.transform, false);
+            var viewportRect = viewport.GetComponent<RectTransform>();
+            viewportRect.anchorMin = Vector2.zero;
+            viewportRect.anchorMax = Vector2.one;
+            viewportRect.sizeDelta = Vector2.zero;
+            viewportRect.pivot = new Vector2(0.5f, 0.5f);
+
+            var viewportMask = viewport.AddComponent<RectMask2D>();
+            scrollRect.viewport = viewportRect;
+
+            // 3. 创建 Content（内容容器）
+            GameObject content = new GameObject("Content", typeof(RectTransform));
+            content.transform.SetParent(viewport.transform, false);
+            var contentRect = content.GetComponent<RectTransform>();
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.sizeDelta = new Vector2(0f, 300f); // 默认高度
+            contentRect.pivot = new Vector2(0.5f, 1f);
+
+            scrollRect.content = contentRect;
+
+            // 4. 创建 Scrollbar Vertical
+            GameObject scrollbar = new GameObject("Scrollbar Vertical", typeof(RectTransform));
+            scrollbar.transform.SetParent(go.transform, false);
+            var scrollbarRect = scrollbar.GetComponent<RectTransform>();
+            scrollbarRect.anchorMin = new Vector2(1f, 0f);
+            scrollbarRect.anchorMax = new Vector2(1f, 1f);
+            scrollbarRect.sizeDelta = new Vector2(12f, 0f);
+            scrollbarRect.pivot = new Vector2(1f, 0.5f);
+
+            var scrollbarImage = scrollbar.AddComponent<Image>();
+            scrollbarImage.color = new Color(0f, 0f, 0f, 0.25f);
+            var scrollbarComponent = scrollbar.AddComponent<Scrollbar>();
+            scrollbarComponent.direction = Scrollbar.Direction.BottomToTop;
+
+            // 5. 创建 Scrollbar/Sliding Area
+            GameObject slidingArea = new GameObject("Sliding Area", typeof(RectTransform));
+            slidingArea.transform.SetParent(scrollbar.transform, false);
+            var slidingRect = slidingArea.GetComponent<RectTransform>();
+            slidingRect.anchorMin = Vector2.zero;
+            slidingRect.anchorMax = Vector2.one;
+            slidingRect.sizeDelta = Vector2.zero;
+
+            // 6. 创建 Scrollbar/Sliding Area/Handle
+            GameObject handle = new GameObject("Handle", typeof(RectTransform));
+            handle.transform.SetParent(slidingArea.transform, false);
+            var handleRect = handle.GetComponent<RectTransform>();
+            handleRect.sizeDelta = new Vector2(12f, 12f);
+            var handleImage = handle.AddComponent<Image>();
+            handleImage.color = new Color(1f, 1f, 1f, 0.5f);
+
+            scrollbarComponent.handleRect = handleRect;
+            scrollbarComponent.targetGraphic = handleImage;
+
+            // 7. 绑定 Scrollbar 到 ScrollRect
+            scrollRect.verticalScrollbar = scrollbarComponent;
+            scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
+        }
+
+        /// <summary>
+        /// InputField 组件的后处理钩子：创建完整的输入框层级并绑定引用
+        /// </summary>
+        static void PostProcessInputField(GameObject go, JObject node)
+        {
+            // 1. 添加背景 Image
+            var image = go.AddComponent<Image>();
+            image.raycastTarget = true;
+            var bgSprite = LoadAsset<Sprite>("Assets/UI/AtlasResources/CommonUI/input_bg.png");
+            if (bgSprite != null)
+            {
+                image.sprite = bgSprite;
+            }
+
+            // 2. 添加 TMP_InputField
+            var inputField = go.AddComponent<TMP_InputField>();
+
+            // 3. 创建 Text Area（遮罩容器）
+            GameObject textArea = new GameObject("Text Area", typeof(RectTransform));
+            textArea.transform.SetParent(go.transform, false);
+            var textAreaRect = textArea.GetComponent<RectTransform>();
+            textAreaRect.anchorMin = Vector2.zero;
+            textAreaRect.anchorMax = Vector2.one;
+            textAreaRect.sizeDelta = new Vector2(-20f, -6f);
+            textAreaRect.pivot = new Vector2(0.5f, 0.5f);
+
+            var rectMask = textArea.AddComponent<RectMask2D>();
+
+            // 4. 创建 Placeholder
+            GameObject placeholder = new GameObject("Placeholder", typeof(RectTransform));
+            placeholder.transform.SetParent(textArea.transform, false);
+            var placeholderRect = placeholder.GetComponent<RectTransform>();
+            placeholderRect.anchorMin = Vector2.zero;
+            placeholderRect.anchorMax = Vector2.one;
+            placeholderRect.sizeDelta = Vector2.zero;
+
+            var placeholderTmp = placeholder.AddComponent<TextMeshProUGUI>();
+            string placeholderText = (string)node?["placeholder"];
+            placeholderTmp.text = string.IsNullOrEmpty(placeholderText) ? "请输入..." : placeholderText;
+            placeholderTmp.fontSize = 20f;
+            placeholderTmp.color = new Color(0.67f, 0.67f, 0.67f, 1f); // #AAAAAA
+            placeholderTmp.alignment = TextAlignmentOptions.Left;
+            placeholderTmp.font = LoadAsset<TMP_FontAsset>("Assets/Resources/Font/ssfttSDF.asset");
+            placeholderTmp.fontSharedMaterial = LoadAsset<Material>("Assets/Resources/Font/ssfttSDF_UI_NoOutLine.mat");
+
+            // 5. 创建 Text
+            GameObject text = new GameObject("Text", typeof(RectTransform));
+            text.transform.SetParent(textArea.transform, false);
+            var textRect = text.GetComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.sizeDelta = Vector2.zero;
+
+            var textTmp = text.AddComponent<TextMeshProUGUI>();
+            textTmp.text = "";
+            textTmp.fontSize = 20f;
+            textTmp.color = Color.white;
+            textTmp.alignment = TextAlignmentOptions.Left;
+            textTmp.font = LoadAsset<TMP_FontAsset>("Assets/Resources/Font/ssfttSDF.asset");
+            textTmp.fontSharedMaterial = LoadAsset<Material>("Assets/Resources/Font/ssfttSDF_UI_NoOutLine.mat");
+
+            // 6. 绑定引用
+            inputField.textViewport = textAreaRect;
+            inputField.textComponent = textTmp;
+            inputField.placeholder = placeholderTmp;
+        }
+
+        /// <summary>
+        /// ItemSlot 组件的后处理钩子：创建物品图标插槽的完整层级
+        /// </summary>
+        static void PostProcessItemSlot(GameObject go, JObject node)
+        {
+            // 1. 添加背景 Image
+            // 注意：slot.item-icon 从未有过真实扫描依据（低置信度启发式组件）。
+            // 默认贴图仅用于占位可视化验证（复用其他配方已验证存在的通用素材），
+            // 正式接入时应替换为业务专属美术图。
+            var bgImage = go.AddComponent<Image>();
+            bgImage.raycastTarget = true;
+            var bgSprite = LoadAsset<Sprite>("Assets/UI/AtlasResources/CommonPanel/ty_tk_frame_07.png");
+            if (bgSprite != null)
+            {
+                bgImage.sprite = bgSprite;
+            }
+
+            // 2. 创建 Icon（居中，80x80）
+            GameObject icon = new GameObject("Icon", typeof(RectTransform));
+            icon.transform.SetParent(go.transform, false);
+            var iconRect = icon.GetComponent<RectTransform>();
+            iconRect.anchorMin = new Vector2(0.5f, 0.5f);
+            iconRect.anchorMax = new Vector2(0.5f, 0.5f);
+            iconRect.sizeDelta = new Vector2(80f, 80f);
+            iconRect.pivot = new Vector2(0.5f, 0.5f);
+
+            var rawImage = icon.AddComponent<RawImage>();
+            rawImage.raycastTarget = false;
+            var iconTexture = LoadAsset<Texture2D>("Assets/UI/AtlasResources/CommonPanel/jh_frame_08.png");
+            if (iconTexture != null)
+            {
+                rawImage.texture = iconTexture;
+            }
+
+            Type asyncTextureType = FindType("LR.AsyncTexture");
+            if (asyncTextureType != null)
+            {
+                var asyncTexture = icon.AddComponent(asyncTextureType);
+
+                // 绑定 m_RawImage
+                var serializedObject = new SerializedObject(asyncTexture);
+                serializedObject.Update();
+                var rawImageProp = serializedObject.FindProperty("m_RawImage");
+                if (rawImageProp != null)
+                {
+                    rawImageProp.objectReferenceValue = rawImage;
+                    serializedObject.ApplyModifiedProperties();
+                }
+            }
+
+            // 3. 创建 Count（右下角）
+            GameObject count = new GameObject("Count", typeof(RectTransform));
+            count.transform.SetParent(go.transform, false);
+            var countRect = count.GetComponent<RectTransform>();
+            countRect.anchorMin = new Vector2(1f, 0f);
+            countRect.anchorMax = new Vector2(1f, 0f);
+            countRect.sizeDelta = new Vector2(60f, 30f);
+            countRect.pivot = new Vector2(1f, 0f);
+            countRect.anchoredPosition = new Vector2(-5f, 5f);
+
+            var countTmp = count.AddComponent<TextMeshProUGUI>();
+            countTmp.text = "";
+            countTmp.fontSize = 20f;
+            countTmp.color = Color.white;
+            countTmp.alignment = TextAlignmentOptions.BottomRight;
+            countTmp.font = LoadAsset<TMP_FontAsset>("Assets/Resources/Font/fzhjtSDF.asset");
+            countTmp.fontSharedMaterial = LoadAsset<Material>("Assets/Resources/Font/fzhjtSDF_UI_OutLine1Px.mat");
+
+            // 4. 创建 QualityFrame（全覆盖）
+            GameObject qualityFrame = new GameObject("QualityFrame", typeof(RectTransform));
+            qualityFrame.transform.SetParent(go.transform, false);
+            var frameRect = qualityFrame.GetComponent<RectTransform>();
+            frameRect.anchorMin = Vector2.zero;
+            frameRect.anchorMax = Vector2.one;
+            frameRect.sizeDelta = Vector2.zero;
+
+            // QualityFrame 复用同一张边框图占位；正式品质颜色/图案由业务运行时根据物品品质设置。
+            var frameImage = qualityFrame.AddComponent<Image>();
+            frameImage.raycastTarget = false;
+            var frameSprite = LoadAsset<Sprite>("Assets/UI/AtlasResources/CommonPanel/ty_tk_frame_07.png");
+            if (frameSprite != null)
+            {
+                frameImage.sprite = frameSprite;
+            }
+        }
+
+        /// <summary>
+        /// Modal 组件的后处理钩子：创建模态弹窗的完整层级
+        /// </summary>
+        static void PostProcessModal(GameObject go, JObject node)
+        {
+            // 1. 创建 Mask（全屏半透明遮罩）
+            GameObject mask = new GameObject("Mask", typeof(RectTransform));
+            mask.transform.SetParent(go.transform, false);
+            var maskRect = mask.GetComponent<RectTransform>();
+            maskRect.anchorMin = Vector2.zero;
+            maskRect.anchorMax = Vector2.one;
+            maskRect.sizeDelta = Vector2.zero;
+
+            var maskImage = mask.AddComponent<Image>();
+            maskImage.color = new Color(0f, 0f, 0f, 0.5f); // #00000080
+            maskImage.raycastTarget = true;
+
+            var maskButton = mask.AddComponent<Button>();
+
+            // 2. 创建 Container（弹窗内容容器，居中）
+            GameObject container = new GameObject("Container", typeof(RectTransform));
+            container.transform.SetParent(go.transform, false);
+            var containerRect = container.GetComponent<RectTransform>();
+            containerRect.anchorMin = new Vector2(0.5f, 0.5f);
+            containerRect.anchorMax = new Vector2(0.5f, 0.5f);
+            containerRect.sizeDelta = new Vector2(600f, 400f);
+            containerRect.pivot = new Vector2(0.5f, 0.5f);
+
+            var containerImage = container.AddComponent<Image>();
+            containerImage.color = Color.white;
+            containerImage.raycastTarget = true;
+            var containerSprite = LoadAsset<Sprite>("Assets/UI/AtlasResources/CommonPanel/bg2x2.png");
+            if (containerSprite != null)
+            {
+                containerImage.sprite = containerSprite;
+            }
+        }
+
+        /// <summary>
+        /// RewardCell 组件的后处理钩子：创建奖励单元格的完整层级
+        /// 注意：背景 Image 已由配方 components 数组挂载，这里不重复添加
+        /// </summary>
+        static void PostProcessRewardCell(GameObject go, JObject node)
+        {
+            // 2. 创建 Icon（居中上方，使用简化的 slot 样式）
+            GameObject icon = new GameObject("Icon", typeof(RectTransform));
+            icon.transform.SetParent(go.transform, false);
+            var iconRect = icon.GetComponent<RectTransform>();
+            iconRect.anchorMin = new Vector2(0.5f, 0.5f);
+            iconRect.anchorMax = new Vector2(0.5f, 0.5f);
+            iconRect.sizeDelta = new Vector2(80f, 80f);
+            iconRect.pivot = new Vector2(0.5f, 0.5f);
+            iconRect.anchoredPosition = new Vector2(0f, 15f);
+
+            var rawImage = icon.AddComponent<RawImage>();
+            rawImage.raycastTarget = false;
+            var iconTexture = LoadAsset<Texture2D>("Assets/UI/AtlasResources/CommonPanel/jh_frame_08.png");
+            if (iconTexture != null)
+            {
+                rawImage.texture = iconTexture;
+            }
+
+            Type asyncTextureType = FindType("LR.AsyncTexture");
+            if (asyncTextureType != null)
+            {
+                var asyncTexture = icon.AddComponent(asyncTextureType);
+                var serializedObject = new SerializedObject(asyncTexture);
+                serializedObject.Update();
+                var rawImageProp = serializedObject.FindProperty("m_RawImage");
+                if (rawImageProp != null)
+                {
+                    rawImageProp.objectReferenceValue = rawImage;
+                    serializedObject.ApplyModifiedProperties();
+                }
+            }
+
+            // 3. 创建 Name（居中下方）
+            GameObject name = new GameObject("Name", typeof(RectTransform));
+            name.transform.SetParent(go.transform, false);
+            var nameRect = name.GetComponent<RectTransform>();
+            nameRect.anchorMin = new Vector2(0f, 0f);
+            nameRect.anchorMax = new Vector2(1f, 0f);
+            nameRect.sizeDelta = new Vector2(0f, 30f);
+            nameRect.pivot = new Vector2(0.5f, 0f);
+            nameRect.anchoredPosition = new Vector2(0f, 5f);
+
+            var nameTmp = name.AddComponent<TextMeshProUGUI>();
+            nameTmp.text = "";
+            nameTmp.fontSize = 18f;
+            nameTmp.color = Color.white;
+            nameTmp.alignment = TextAlignmentOptions.Center;
+            nameTmp.font = LoadAsset<TMP_FontAsset>("Assets/Resources/Font/fzhjtSDF.asset");
+            nameTmp.fontSharedMaterial = LoadAsset<Material>("Assets/Resources/Font/fzhjtSDF_UI_NoOutLine.mat");
+        }
+
+        /// <summary>
+        /// TabItem 组件的后处理钩子：创建标签页按钮的完整层级
+        /// </summary>
+        static void PostProcessTabItem(GameObject go, JObject node)
+        {
+            // 1. 添加 Button 和 Image
+            // 注意：template.tab-item 从未有过真实扫描依据（低置信度启发式组件）。
+            // 默认贴图仅用于占位可视化验证，正式接入时应替换为业务专属页签样式（选中/未选中态）。
+            var button = go.AddComponent<Button>();
+
+            var image = go.AddComponent<Image>();
+            image.raycastTarget = true;
+            var bgSprite = LoadAsset<Sprite>("Assets/UI/AtlasResources/CommonPanel/ty_btn_11.png");
+            if (bgSprite != null)
+            {
+                image.sprite = bgSprite;
+            }
+
+            button.targetGraphic = image;
+
+            // 2. 创建 Icon（左侧，可选）
+            GameObject icon = new GameObject("Icon", typeof(RectTransform));
+            icon.transform.SetParent(go.transform, false);
+            var iconRect = icon.GetComponent<RectTransform>();
+            iconRect.anchorMin = new Vector2(0f, 0.5f);
+            iconRect.anchorMax = new Vector2(0f, 0.5f);
+            iconRect.sizeDelta = new Vector2(32f, 32f);
+            iconRect.pivot = new Vector2(0f, 0.5f);
+            iconRect.anchoredPosition = new Vector2(10f, 0f);
+
+            var iconImage = icon.AddComponent<Image>();
+            iconImage.raycastTarget = false;
+            var iconSprite = LoadAsset<Sprite>("Assets/UI/AtlasResources/FuncMenuListIcon/zjm_icon_07.png");
+            if (iconSprite != null)
+            {
+                iconImage.sprite = iconSprite;
+            }
+
+            // 3. 创建 Label（居中或偏右）
+            GameObject label = new GameObject("Label", typeof(RectTransform));
+            label.transform.SetParent(go.transform, false);
+            var labelRect = label.GetComponent<RectTransform>();
+            labelRect.anchorMin = new Vector2(0f, 0f);
+            labelRect.anchorMax = new Vector2(1f, 1f);
+            labelRect.sizeDelta = Vector2.zero;
+
+            var labelTmp = label.AddComponent<TextMeshProUGUI>();
+            string text = (string)node?["text"];
+            labelTmp.text = string.IsNullOrEmpty(text) ? "Tab" : text;
+            labelTmp.fontSize = 24f;
+            labelTmp.color = Color.white;
+            labelTmp.alignment = TextAlignmentOptions.Center;
+            labelTmp.font = LoadAsset<TMP_FontAsset>("Assets/Resources/Font/fzhjtSDF.asset");
+            labelTmp.fontSharedMaterial = LoadAsset<Material>("Assets/Resources/Font/fzhjtSDF_UI_NoOutLine.mat");
+        }
+
+        /// <summary>
+        /// GridScrollView 组件的后处理钩子：创建多列网格滚动列表层级结构
+        /// 包括 LR.ScrollView（根节点）、Viewport（遮罩）、Content（GridLayoutGroup）和 Scrollbar
+        /// </summary>
+        static void PostProcessGridScrollView(GameObject go, JObject node)
+        {
+            // 1. 添加 LR.ScrollView 组件（继承自 ScrollRect）
+            Type scrollViewType = FindType("LR.ScrollView");
+            ScrollRect scrollRect;
+
+            if (scrollViewType != null && typeof(ScrollRect).IsAssignableFrom(scrollViewType))
+            {
+                scrollRect = (ScrollRect)go.AddComponent(scrollViewType);
+            }
+            else
+            {
+                Debug.LogWarning($"[ComponentRecipes] 未找到 LR.ScrollView 类型，退化为普通 ScrollRect");
+                scrollRect = go.AddComponent<ScrollRect>();
+            }
+
+            scrollRect.horizontal = false;
+            scrollRect.vertical = true;
+            scrollRect.scrollSensitivity = 1f;
+            scrollRect.movementType = ScrollRect.MovementType.Elastic;
+
+            // 2. 创建 Viewport（遮罩容器）
+            GameObject viewport = new GameObject("Viewport", typeof(RectTransform));
+            viewport.transform.SetParent(go.transform, false);
+            var viewportRect = viewport.GetComponent<RectTransform>();
+            viewportRect.anchorMin = Vector2.zero;
+            viewportRect.anchorMax = Vector2.one;
+            viewportRect.sizeDelta = Vector2.zero;
+            viewportRect.pivot = new Vector2(0.5f, 0.5f);
+
+            var viewportMask = viewport.AddComponent<RectMask2D>();
+            scrollRect.viewport = viewportRect;
+
+            // 3. 创建 Content（网格布局容器）
+            GameObject content = new GameObject("Content", typeof(RectTransform));
+            content.transform.SetParent(viewport.transform, false);
+            var contentRect = content.GetComponent<RectTransform>();
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.sizeDelta = new Vector2(0f, 600f); // 默认高度
+            contentRect.pivot = new Vector2(0.5f, 1f);
+
+            // 添加 GridLayoutGroup
+            var gridLayout = content.AddComponent<GridLayoutGroup>();
+            gridLayout.cellSize = new Vector2(150f, 150f);
+            gridLayout.spacing = new Vector2(10f, 10f);
+            gridLayout.startCorner = GridLayoutGroup.Corner.UpperLeft;
+            gridLayout.startAxis = GridLayoutGroup.Axis.Horizontal;
+            gridLayout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+            gridLayout.constraintCount = 4;
+
+            scrollRect.content = contentRect;
+
+            // 4. 创建 Scrollbar Vertical
+            GameObject scrollbar = new GameObject("Scrollbar Vertical", typeof(RectTransform));
+            scrollbar.transform.SetParent(go.transform, false);
+            var scrollbarRect = scrollbar.GetComponent<RectTransform>();
+            scrollbarRect.anchorMin = new Vector2(1f, 0f);
+            scrollbarRect.anchorMax = new Vector2(1f, 1f);
+            scrollbarRect.sizeDelta = new Vector2(12f, 0f);
+            scrollbarRect.pivot = new Vector2(1f, 0.5f);
+
+            var scrollbarImage = scrollbar.AddComponent<Image>();
+            scrollbarImage.color = new Color(0f, 0f, 0f, 0.25f);
+            var scrollbarComponent = scrollbar.AddComponent<Scrollbar>();
+            scrollbarComponent.direction = Scrollbar.Direction.BottomToTop;
+
+            // 5. 创建 Scrollbar/Sliding Area
+            GameObject slidingArea = new GameObject("Sliding Area", typeof(RectTransform));
+            slidingArea.transform.SetParent(scrollbar.transform, false);
+            var slidingRect = slidingArea.GetComponent<RectTransform>();
+            slidingRect.anchorMin = Vector2.zero;
+            slidingRect.anchorMax = Vector2.one;
+            slidingRect.sizeDelta = Vector2.zero;
+
+            // 6. 创建 Scrollbar/Sliding Area/Handle
+            GameObject handle = new GameObject("Handle", typeof(RectTransform));
+            handle.transform.SetParent(slidingArea.transform, false);
+            var handleRect = handle.GetComponent<RectTransform>();
+            handleRect.sizeDelta = new Vector2(12f, 12f);
+            var handleImage = handle.AddComponent<Image>();
+            handleImage.color = new Color(1f, 1f, 1f, 0.5f);
+
+            scrollbarComponent.handleRect = handleRect;
+            scrollbarComponent.targetGraphic = handleImage;
+
+            // 7. 绑定 Scrollbar 到 ScrollRect
+            scrollRect.verticalScrollbar = scrollbarComponent;
+            scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
         }
     }
 }

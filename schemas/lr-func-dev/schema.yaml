@@ -13,13 +13,13 @@ artifacts:
       **前置条件检查**：
       确认以下文件存在（由 lr-design skill 生成）：
       - changes/<id>/plan/working.md（策划案定稿版）
-      - changes/<id>/demo/*.html（策划验收通过的原型）
+      - changes/<id>/demo/src/**/*.tsx（策划验收通过的 React 原型源码，排除 main.tsx）
 
       如果文件不存在，报错：
       ```
       错误：缺少必要输入文件
 
-      proposal 产物依赖 plan/working.md 和 demo/*.html，但未找到这些文件。
+      proposal 产物依赖 plan/working.md 和 demo/src/**/*.tsx，但未找到这些文件。
 
       请先运行 lr-design skill 生成这些文件：
       /lr-design <id>
@@ -27,7 +27,7 @@ artifacts:
 
       **输入文件**：
       - changes/<id>/plan/working.md（策划案，含对齐循环的决策挂账）
-      - changes/<id>/demo/*.html（交互原型）
+      - changes/<id>/demo/src/**/*.tsx（React 原型源码）
 
       **文档结构**（沿用四段结构，不增删标题）：
       ```markdown
@@ -56,7 +56,7 @@ artifacts:
         ```
         只记"策划必须决定"的项；工程实现问题不进这张表。
 
-      **从 demo 提取的补充信息**（用于丰富 Impact/Capabilities 的描述，不单独成段）：
+      **从 React 原型提取的补充信息**（用于丰富 Impact/Capabilities 的描述，不单独成段）：
       - Page/Panel 清单（统计 data-lr-component="surface.page"/"surface.panel"）
       - 数据字段清单（统计 data-lr-bind）
       - 用户操作清单（统计 data-lr-action）
@@ -71,7 +71,7 @@ artifacts:
       **输入文件**：
       - changes/<id>/proposal.md（技术提案，含 Capabilities 划分）
       - changes/<id>/plan/working.md（策划案定稿版，提取用户场景）
-      - changes/<id>/demo/*.html（交互原型，补充异常/边界场景）
+      - changes/<id>/demo/src/**/*.tsx（React 原型源码，补充异常/边界场景）
 
       **判断 ADDED 还是 MODIFIED**：
       - openspec/specs/ 下没有这个能力的既有 spec（多数情况）→ 一律 ## ADDED Requirements
@@ -273,22 +273,31 @@ artifacts:
 
       **输入文件**：
       - changes/<id>/specs/**/*.md（验收场景）
-      - changes/<id>/demo/*.html（Web 原型）
+      - changes/<id>/demo/src/**/*.tsx（React 原型源码）
       - changes/<id>/proposal.md（业务背景）
 
-      **从 demo 提取结构信息**（语义 ID 见 .claude/skills/lr-design/references/unity-ui-components.md 白名单)：
-      1. 扫描所有 data-lr-component="surface.page"/"surface.panel"，列出 Page/Panel 清单
-      2. 对每个 Page/Panel，提取其下的 data-lr-bind 字段，作为成员变量清单
-         示例：data-lr-bind="title" → m_TxtTitle: Text
-      3. 对每个 Page/Panel，提取其下的 data-lr-action，作为方法签名清单
-         示例：data-lr-action="onClaimClick" → void OnClaimClick(int fundId)
+      **从 React 原型提取结构信息**（语义 ID 见 .claude/skills/lr-design/references/unity-ui-components.md 白名单)：
+      1. **扫描范围**：`changes/<id>/demo/src/**/*.tsx`（排除 `main.tsx`）
+         - 包括 `App.tsx` 和所有拆分的组件文件（如 `components/RewardCell.tsx`）
+         - **优势**：独立组件文件天然对应 Unity Cell Prefab 复用机制
+      2. 扫描所有 `data-lr-component="surface.page"/"surface.panel"`，列出 Page/Panel 清单
+      3. 对每个 Page/Panel，提取其下的 `data-lr-bind` 字段，作为成员变量清单
+         - 示例：`data-lr-bind="title"` → `m_TxtTitle: Text`
+         - **React 优势**：列表项的 bind 在 `.map()` 渲染中直接可见
+      4. 对每个 Page/Panel，提取其下的 `data-lr-action`，作为方法签名清单
+         - 示例：`data-lr-action="onClaimClick"` → `void OnClaimClick(int fundId)`
+         - **React 优势**：条件渲染的 action（如 `{canClaim && <button data-lr-action>`）在源码中清晰可见
+
+      **提取方式**：
+      - 用正则匹配所有 tsx 文件中的 `data-lr-*` 属性
+      - 所有这些属性在 JSX 中都是字符串字面量，不需要执行 React 代码
 
       **生成要求**：
       1. 按 client-structure.md 定义的章节结构组织内容
       2. 模块定义（模块名、文件路径、UI 文件组织、功能 ID 分配）
       3. Record 表定义（表名常量、列定义、访问方式）必须与服务端完全对齐
       4. 协议定义（消息号、字段、调用时机）
-      5. UI Panel 结构（从 demo 提取成员变量和方法签名）
+      5. UI Panel 结构（从 React 原型源码提取成员变量和方法签名）
       6. 状态机定义（状态 → 事件 → 新状态）
       7. 交互流程（用户操作 → 协议调用 → UI 刷新）
       8. 未确认的协议字段、UI 交互细节、状态转移条件必须列入 ## Open Questions 章节
@@ -786,7 +795,7 @@ apply:
 
     **输入**：
     - design.md 附录 A（客户端详细设计）
-    - demo/xxx.html（Web 原型，data-lr-* 标注）
+    - demo/src/**/*.tsx（React 原型源码，data-lr-* 标注）
     - rules/tasks/client-implementation.md（代码模板）
 
     **执行逻辑**：
@@ -796,12 +805,18 @@ apply:
     **触发条件**：任务描述包含"生成 XXXPanel.cs 骨架"
 
     **执行步骤**：
-    1. **读取 demo/*.html 提取结构信息**
+    1. **读取 demo/src/**/*.tsx 提取结构信息**
        - 找到对应 Panel 的 `data-lr-component="surface.panel"` 节点
        - 提取所有 `data-lr-bind` → 生成成员变量声明
          - 示例：`data-lr-bind="title"` + 组件类型 `text` → `private Text m_TxtTitle;`
+         - **React 优势**：动态列表项的 bind 在 `.map()` 中清晰可见
        - 提取所有 `data-lr-action` → 生成方法签名
          - 示例：`data-lr-action="onClaimClick"` → `private void OnClaimClick() { }`
+         - **React 优势**：条件渲染的 action（如 `{canClaim && <button data-lr-action>`）在源码中清晰可见
+
+    **提取方式**：
+    - 直接用正则匹配 TSX 源码中的 `data-lr-*` 属性
+    - 无需执行代码，因为属性都是字符串字面量
 
     2. **命名约定**（参考 rules/tasks/client-implementation.md）
        - Text 组件：`m_TxtXxx`

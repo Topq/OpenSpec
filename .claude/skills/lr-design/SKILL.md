@@ -1,13 +1,13 @@
 ---
 name: lr-design
-description: 灵刃策划案 → OpenSpec 变更(proposal + specs delta + Web 原型 demo)的策划侧闭环流程。只要用户给出飞书策划案链接,或提到"策划案审查""生成原型/demo""建 proposal""提变更""开需求"等意图,即使没有点名 openspec,也应使用本技能。覆盖:下载飞书策划案、完整性审查与对齐、生成带 Unity 组件标识的 Web 原型、策划验收,再触发 lr-func-dev schema 的 proposal/specs 产物并通过校验。不做 design.md 和 tasks.md(那是开发阶段的事,由同一 schema 的后续产物接手),不回写飞书。
+description: 灵刃策划案 → OpenSpec 变更(proposal + specs delta + React TypeScript 原型 demo)的策划侧闭环流程。只要用户给出飞书策划案链接,或提到"策划案审查""生成原型/demo""建 proposal""提变更""开需求"等意图,即使没有点名 openspec,也应使用本技能。覆盖:下载飞书策划案、完整性审查与对齐、生成带 Unity 组件标识的 React TypeScript 原型、策划验收,再触发 lr-func-dev schema 的 proposal/specs 产物并通过校验。不做 design.md 和 tasks.md(那是开发阶段的事,由同一 schema 的后续产物接手),不回写飞书。
 ---
 
 # 灵刃策划案 → OpenSpec 变更(策划侧闭环)
 
 ## 角色与目标
 
-面向策划工作。帮助策划把飞书策划案讲完整、消除冲突,先用 Web 原型验证体验,再沉淀为 openspec 变更(proposal + specs delta),交给联合评审和后续开发。
+面向策划工作。帮助策划把飞书策划案讲完整、消除冲突,先用 React TypeScript 原型验证体验,再沉淀为 openspec 变更(proposal + specs delta),交给联合评审和后续开发。
 
 对策划使用玩法、页面、状态、奖励、时间和体验语言;将 API 调用、token、分页、文档块解析、openspec 命令细节留在后台。不要把自己表现成飞书接口调试器或代码开发助手。
 
@@ -58,6 +58,8 @@ description: 灵刃策划案 → OpenSpec 变更(proposal + specs delta + Web �
 
 ## 完整性判定
 
+策划案中标题含"美术需求""美术资源"等、内容是对美术团队的资源/风格描述(素材参考图、色系、元素替换说明等)的章节,不纳入完整性判定和阻断问题扫描——那是写给美术的产出要求,不是玩法规则。生成原型时仍可从中提取视觉方向(配色、氛围)作为参考,但缺失或模糊不作为阻断依据。
+
 生成原型前逐项检查:
 
 1. 功能目标、目标玩家、开放条件和活动范围明确。
@@ -73,7 +75,7 @@ description: 灵刃策划案 → OpenSpec 变更(proposal + specs delta + Web �
 
 阻断问题的判定:同一行为在不同章节结果不同;关键状态缺进入/表现/退出条件;付费、消耗、奖励可能因未定义规则产生不同结果;必须展示的内容没有示例数据;关键图表无法读取且正文不足以还原。
 
-不属于阻断:防连点、请求禁用等通用工程保护;协议、数据结构、配置表的工程实现方式;生产美术未完成但页面结构和视觉方向已足够。若工程处理会改变玩家可见结果或经济结果,重新归类为策划问题。
+不属于阻断:防连点、请求禁用等通用工程保护;协议、数据结构、配置表的工程实现方式;生产美术未完成但页面结构和视觉方向已足够;美术需求章节本身的缺失或模糊。若工程处理会改变玩家可见结果或经济结果,重新归类为策划问题。
 
 ## 执行流程
 
@@ -87,9 +89,9 @@ description: 灵刃策划案 → OpenSpec 变更(proposal + specs delta + Web �
 python scripts/workflow.py --url <飞书链接> --name <功能名>
 ```
 
-脚本静默完成认证、拉取正文表格、下载图片、转换 Markdown,产出 `tmp/session-<名>-<时间戳>/working.md`(凭据读 skill 根目录 config.json;首次使用需从 config.json.example 复制填写)。完成后只说:"已下载策划案《标题》,正在分析..."
+脚本下载前会先清空 `tmp/` 下所有历史会话目录(避免跨任务污染),再静默完成认证、拉取正文表格、下载图片、转换 Markdown,产出 `tmp/session-<名>-<时间戳>/working.md`(凭据读 skill 根目录 config.json;首次使用需从 config.json.example 复制填写)。完成后只说:"已下载策划案《标题》,正在分析..."
 
-若策划直接给的是本地 md/文本/粘贴内容而非飞书链接,跳过下载:用 `manage_session.py create` 建会话目录,把内容存为其中的 working.md(引用图片一并复制到 images/)继续。
+若策划直接给的是本地 md/文本/粘贴内容而非飞书链接,跳过下载:先运行 `python scripts/manage_session.py clean` 清空历史会话,再用 `manage_session.py create` 建会话目录,把内容存为其中的 working.md(引用图片一并复制到 images/)继续。
 
 ### 第 1 步:首轮审查
 
@@ -105,13 +107,26 @@ python scripts/workflow.py --url <飞书链接> --name <功能名>
 
 过闸动作:与策划确认变更名(功能英文短名,kebab-case,如 `fund-func`;策划给中文名/下划线名时转换后复述确认),然后运行 `openspec new change <id>` 建立 `changes/<id>/`。
 
-### 第 3 步:生成 Web 原型
+### 第 3 步:生成 React + TypeScript 原型
 
-产出位置:`changes/<id>/demo/`。这个位置是定死的:原型随变更走,开发做 UI prefab 时直接从这里取,archive 后随变更进档案。
+产出位置:`changes/<id>/demo/`，包含：
+- **固定配置**（从模板复制，AI 不修改）：
+  - `package.json` / `vite.config.ts` / `tsconfig.json` / `tsconfig.node.json` / `index.html`
+  - `src/main.tsx` / `src/styles.css`（包含 1920×1080 画布约束）
 
-生成规则见"Web 原型规范"一节。行为严格出自 working.md 已确认的规则;确实没写死的细节,记入假设清单(见下),不阻断也不静默拍板。
+- **AI 自由创建/修改**（src/ 目录下任意 .tsx/.ts 文件）：
+  - `src/App.tsx` - 根组件
+  - `src/data.ts` / `src/types.ts` - 数据与类型
+  - `src/components/*.tsx` - 可复用组件（对应 Unity Cell 模板）
+  - **复杂界面建议拆分**：弹窗、列表项、独立区块可拆成独立组件
 
-完成后静默运行 `python scripts/validate_demo.py changes/<id>/demo`,修复全部错误后再交给策划。
+生成规则见"React 原型规范"一节。行为严格出自 working.md 已确认的规则;确实没写死的细节,记入假设清单(见下),不阻断也不静默拍板。
+
+**构建与验收**：
+1. 生成后运行 `npm install`（首次）
+2. 运行 `npm run build` → 产出 `demo/dist/index.html`
+3. 完成后静默运行 `python scripts/validate_demo.py changes/<id>/demo`,修复全部错误后再交给策划
+4. **默认在后台启动 `npm run dev`**,把可访问地址(如 `http://localhost:3000/`)直接发给策划,不要求策划自己执行命令;策划验收全程结束或会话中止时关闭该进程
 
 ### 第 4 步:验收循环
 
@@ -157,19 +172,103 @@ python scripts/workflow.py --url <飞书链接> --name <功能名>
 
 任务取消或中止时也清理临时目录,除非仍需保留现场恢复。
 
-## Web 原型规范
+## React 原型规范
 
 原型是后续 Unity UI prefab 制作的输入,标注质量直接影响开发,严格遵守:
 
-1. 只在 `changes/<id>/demo/` 下创建或更新文件。
-2. 严格实现 working.md 已确认的页面、状态、购买、领取、红点和异常流程。
-3. 使用下载的图片和策划案视觉方向;生产美术未完成时可制作符合方向的原型视觉,但不改变策划规则。
-4. 读取 [Unity UI 组件白名单](references/unity-ui-components.md),只使用白名单语义 ID。
-5. 对需要转换到 Unity 的节点添加 HTML 原生 `id` 和 `data-lr-component`;业务属性按需添加。
-6. 允许的 HTML 标识只有——常规必填:`id`、`data-lr-component`;业务按需:`data-lr-template`、`data-lr-slot`、`data-lr-bind`、`data-lr-action`、`data-lr-visible-when`、`data-lr-bake`。
-7. 不添加白名单之外的 `data-lr-*` 属性,不在 HTML 中固化锚点、Pivot、布局或方向。
-8. `data-lr-component` 用 `list.single-scroll` 这类稳定语义 ID,不得写 `LR.SingleScrollView` 等实现类名。
-9. 交付前 `python scripts/validate_demo.py changes/<id>/demo` 必须零错误。
+### 1. 文件组织
+
+**固定配置**（从 `templates/react-demo/` 模板复制，**AI 不得修改**）：
+- `package.json`、`vite.config.ts`、`tsconfig.json`、`tsconfig.node.json`
+- `index.html`、`src/main.tsx`
+- `src/styles.css` - 包含 **强制 1920×1080 画布约束**
+
+**AI 自由创建/修改**（`src/` 目录下任意 `.tsx` / `.ts` 文件）：
+- `src/App.tsx` - 根组件
+- `src/data.ts` - 业务数据（从 working.md 提取）
+- `src/types.ts` - TypeScript 类型定义
+- `src/components/*.tsx` - 可复用组件（可选）
+
+**拆分原则**：
+- 简单界面（<5个交互元素）：可保持单文件 `App.tsx`
+- 复杂界面（≥5个弹窗/多层 Tab/复用列表项）：**建议拆分**
+  - 弹窗 → 独立组件（如 `PurchaseModal.tsx`）
+  - 列表项 → 独立组件（如 `RewardCell.tsx`，对应 Unity 的 Cell Prefab）
+  - 独立区块 → 独立组件（如 `FundHeader.tsx`）
+
+### 2. 画布尺寸约束（强制）
+
+**所有原型必须在固定的 1920×1080 画布内设计**。
+
+**原因**：
+- Unity Canvas 参考分辨率是 1920×1080
+- 后续坐标自动化提取需要固定尺寸基准
+- 保证策划验收时看到的布局与最终 Unity UI 一致
+
+**实现方式**（已在模板 `src/styles.css` 中定义）：
+```css
+#root {
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  position: relative;
+}
+```
+
+**禁止修改** `#root` 的 width/height。
+
+### 3. 标注规范
+
+严格实现 working.md 已确认的页面、状态、购买、领取、红点和异常流程。
+
+使用下载的图片和策划案视觉方向;生产美术未完成时可制作符合方向的原型视觉,但不改变策划规则。
+
+读取 [Unity UI 组件白名单](references/unity-ui-components.md)，只使用白名单语义 ID。
+
+**JSX 属性标注**（与 HTML 版本完全相同）：
+- **常规必填**：`id`、`data-lr-component`
+- **业务按需**：`data-lr-template`、`data-lr-slot`、`data-lr-bind`、`data-lr-action`、`data-lr-visible-when`、`data-lr-bake`
+- **示例**：
+  ```tsx
+  <button 
+    id="btn-purchase"
+    data-lr-component="control.button"
+    data-lr-action="purchase-fund"
+    onClick={handlePurchase}
+  >
+    购买
+  </button>
+  ```
+
+**禁止**：
+- 添加白名单之外的 `data-lr-*` 属性
+- `data-lr-component` 写实现类名（如 `LR.SingleScrollView`），必须用语义 ID（如 `list.single-scroll`）
+
+### 4. 调试控制台（强制）
+
+demo 必须自带一个悬浮调试控制台,让策划不依赖真实触发条件就能切换状态验收,而不是只能被动看初始数据。控制台本身不算业务组件,不需要 `data-lr-component` 标注,仅用按钮驱动 demo 内部 state。
+
+**文件名固定为 `src/components/DebugConsole.tsx`**(不可改名、不可拆成多个文件)。这是后续 `lr-openspec-ui-prefab` 识别并跳过该文件的唯一依据,改名会导致调试代码被误当成业务节点分析。
+
+按需覆盖的操作类型(按 working.md 已确认的状态机来定,不是每个都要有):
+- **推进条件进度**:如 +N 次抽卡/孵蛋、跳到指定档位解锁
+- **领取类动作**:单档领取、一键领取全部、清空领取记录(重置)
+- **购买态切换**:模拟购买成功、切回未购买
+- **阶段切换**:售卖中 / 售卖结束 / 领取期结束等 `phase` 之间切换
+- **多实例场景**:多个基金/多个 Tab 场景下,分别提供各自的操作或统一批量操作
+
+放置于页面固定定位(如 `position: fixed; bottom` ),不占用 1920×1080 画布内的业务布局区域。
+
+### 5. 验证与构建
+
+交付前必须通过：
+1. **属性校验**：`python scripts/validate_demo.py changes/<id>/demo` 零错误
+2. **构建验证**：`npm run build` 成功产出 `demo/dist/`
+3. **画布验证**（在浏览器 DevTools 中）：
+   ```javascript
+   document.getElementById('root').getBoundingClientRect()
+   // 应返回：{ width: 1920, height: 1080, ... }
+   ```
 
 ### 假设清单
 

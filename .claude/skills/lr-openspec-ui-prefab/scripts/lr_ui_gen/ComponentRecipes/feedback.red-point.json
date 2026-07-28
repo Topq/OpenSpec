@@ -13,7 +13,8 @@
           "type": "UnityEngine.UI.Image",
           "properties": {
             "raycastTarget": false,
-            "color": "#FF0000"
+            "color": "#FF0000",
+            "sprite": "Assets/UI/AtlasResources/CommonUI/ty_icon_hd.png"
           }
         }
       ],
@@ -32,6 +33,7 @@
     "redPointType": "None"
   },
   "notes": [
+    "默认贴图 ty_icon_hd.png：基于 2026-07-28 全项目扫描 245 个红点实例，该素材出现 203 次，是压倒性的通用红点图标（第二名为个位数），远高于 color 染色的纯色方块效果。",
     "红点节点位置不固定：Rank 1 在第 2 个子节点（71 实例），Rank 2 在第 3 个子节点（28 实例）。",
     "新配方采用追加模式（position: last-child）：生成器自动将红点追加到父节点的最后一个子节点，适应父节点的其他子节点数量变化。",
     "蓝点功能（bluePointImage/blueCountText）在 Top 3 高频配方中完全未使用，配方不包含蓝点子节点。",

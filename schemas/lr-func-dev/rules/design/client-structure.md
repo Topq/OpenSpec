@@ -234,7 +234,7 @@ ELSE 协议实时下发即可
 （说明是否需要 DynamicConfigModule）
 
 ## UI 设计
-（从 demo/*.html 提取结构）
+（从 demo/src/**/*.tsx 提取结构，包括拆分的独立组件）
 
 ## 协议定义
 （说明是 Record 驱动还是传统模式）

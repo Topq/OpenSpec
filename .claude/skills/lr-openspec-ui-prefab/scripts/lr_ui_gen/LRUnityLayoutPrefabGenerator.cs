@@ -373,45 +373,76 @@ namespace LRUIPrefabGen
 
             int localizerCount = 0;
             int scrollViewCount = 0;
-            PostProcessNode(jsonRoot, prefabAsset, ref localizerCount, ref scrollViewCount);
+            var localizerEntries = new System.Collections.Generic.List<(string key, string defaultText, string path)>();
+            PostProcessNode(jsonRoot, prefabAsset, ref localizerCount, ref scrollViewCount, localizerEntries);
 
             EditorUtility.SetDirty(prefabAsset);
             PrefabUtility.SavePrefabAsset(prefabAsset);
             AssetDatabase.SaveAssets();
 
             Debug.Log($"[LRUnityLayoutPrefabGenerator] 后处理完成: {prefabPath}，Localizer +{localizerCount}，SingleScrollView 配置 {scrollViewCount} 个");
+
+            // 写入 Language_Keys.md
+            if (localizerEntries.Count > 0)
+            {
+                WriteLanguageKeysMarkdown(prefabPath, localizerEntries);
+            }
         }
 
-        static void PostProcessNode(JObject node, GameObject go, ref int localizerCount, ref int scrollViewCount)
+        static void PostProcessNode(JObject node, GameObject go, ref int localizerCount, ref int scrollViewCount, System.Collections.Generic.List<(string key, string defaultText, string path)> localizerEntries)
         {
             string component = (string)node["component"];
             string field = (string)node["field"];
 
-            // text.localized 且无字段绑定 -> 挂 Localizer（有字段绑定的由 C# 脚本读写文本，不挂）
-            if (component == "text.localized" && string.IsNullOrEmpty(field))
+            // text.localized* 系列的 Localizer 挂载规则：
+            // - 有 field 绑定：移除 Localizer（由 C# 脚本控制文本内容）
+            // - 无 field 绑定：确保有 Localizer 并设置 m_Key（运行时多语言切换）
+            if (!string.IsNullOrEmpty(component) && component.StartsWith("text.localized"))
             {
                 Type localizerType = FindType("LR.Localizer");
-                if (localizerType != null && go.GetComponent(localizerType) == null)
+                if (localizerType != null)
                 {
-                    Component localizer = go.AddComponent(localizerType);
+                    Component existingLocalizer = go.GetComponent(localizerType);
 
-                    // 设置 m_Key 字段：格式为 UI_<PageName>_<NodeName>
-                    string pageName = GetPageNameFromRoot(go);
-                    string nodeName = (string)node["name"];
-                    if (!string.IsNullOrEmpty(pageName) && !string.IsNullOrEmpty(nodeName))
+                    if (!string.IsNullOrEmpty(field))
                     {
-                        string key = $"UI_{pageName}_{nodeName}";
-                        var serializedObject = new SerializedObject(localizer);
-                        serializedObject.Update();
-                        var keyProp = serializedObject.FindProperty("m_Key");
-                        if (keyProp != null)
+                        // 有 field 绑定：移除 Localizer（如果存在）
+                        if (existingLocalizer != null)
                         {
-                            keyProp.stringValue = key;
-                            serializedObject.ApplyModifiedProperties();
+                            UnityEngine.Object.DestroyImmediate(existingLocalizer, true);
                         }
                     }
+                    else
+                    {
+                        // 无 field 绑定：确保有 Localizer 并设置 m_Key
+                        Component localizer = existingLocalizer;
+                        if (localizer == null)
+                        {
+                            localizer = go.AddComponent(localizerType);
+                            localizerCount++;
+                        }
 
-                    localizerCount++;
+                        // 设置 m_Key 字段：格式为 UI_<PanelName>_<NodeName>
+                        string pageName = GetPageNameFromRoot(go);
+                        string nodeName = (string)node["name"];
+                        string defaultText = (string)node["text"] ?? "";
+                        if (!string.IsNullOrEmpty(pageName) && !string.IsNullOrEmpty(nodeName))
+                        {
+                            string key = $"UI_{pageName}_{nodeName}";
+                            var serializedObject = new SerializedObject(localizer);
+                            serializedObject.Update();
+                            var keyProp = serializedObject.FindProperty("m_Key");
+                            if (keyProp != null)
+                            {
+                                keyProp.stringValue = key;
+                                serializedObject.ApplyModifiedProperties();
+                            }
+
+                            // 记录到 Language_Keys.md 待写入列表（增加 path 信息）
+                            string path = GetGameObjectPath(go);
+                            localizerEntries.Add((key, defaultText, path));
+                        }
+                    }
                 }
             }
 
@@ -460,7 +491,7 @@ namespace LRUIPrefabGen
                         Transform grandChildTransform = targetParent.Find(grandChildName);
                         if (grandChildTransform != null)
                         {
-                            PostProcessNode(grandChild, grandChildTransform.gameObject, ref localizerCount, ref scrollViewCount);
+                            PostProcessNode(grandChild, grandChildTransform.gameObject, ref localizerCount, ref scrollViewCount, localizerEntries);
                         }
                     }
                     continue;
@@ -475,7 +506,7 @@ namespace LRUIPrefabGen
                 Transform childTransform = go.transform.Find(childName);
                 if (childTransform != null)
                 {
-                    PostProcessNode(childNode, childTransform.gameObject, ref localizerCount, ref scrollViewCount);
+                    PostProcessNode(childNode, childTransform.gameObject, ref localizerCount, ref scrollViewCount, localizerEntries);
                 }
             }
         }
@@ -651,6 +682,81 @@ namespace LRUIPrefabGen
                 return rootName.Substring(0, rootName.Length - 4);
             }
             return rootName;
+        }
+
+        /// <summary>
+        /// 获取 GameObject 的完整路径（从根节点开始）。
+        /// 例如：GrowthFundPage_Demo/FundHeader/FundName
+        /// </summary>
+        static string GetGameObjectPath(GameObject go)
+        {
+            if (go == null) return "";
+
+            var path = new System.Collections.Generic.List<string>();
+            Transform current = go.transform;
+            while (current != null)
+            {
+                path.Insert(0, current.name);
+                current = current.parent;
+            }
+            return string.Join("/", path);
+        }
+
+        /// <summary>
+        /// 写入 Language_Keys.md 到 changes/{change-id}/ 目录。
+        /// change-id 从 prefabPath 提取：Assets/Editor/{Name}_Demo.prefab 中提取小写 kebab-case。
+        /// 如果是非 Demo prefab（正式生成路径在 Assets/Resources/PanelUI），则不生成 md。
+        /// </summary>
+        static void WriteLanguageKeysMarkdown(string prefabPath, System.Collections.Generic.List<(string key, string defaultText, string path)> entries)
+        {
+            // 只为 Demo prefab 生成（路径包含 Assets/Editor 且文件名包含 _Demo）
+            if (!prefabPath.Contains("Assets/Editor") || !prefabPath.Contains("_Demo"))
+            {
+                return;
+            }
+
+            // 从 prefabPath 提取 change-id：Assets/Editor/GrowthFundPage_Demo.prefab -> growth-fund
+            string fileName = Path.GetFileNameWithoutExtension(prefabPath); // GrowthFundPage_Demo
+            if (fileName.EndsWith("_Demo"))
+            {
+                fileName = fileName.Substring(0, fileName.Length - 5); // GrowthFundPage
+            }
+            if (fileName.EndsWith("Page"))
+            {
+                fileName = fileName.Substring(0, fileName.Length - 4); // GrowthFund
+            }
+
+            // 转小写 kebab-case：GrowthFund -> growth-fund
+            string changeId = System.Text.RegularExpressions.Regex.Replace(fileName, "([a-z])([A-Z])", "$1-$2").ToLower();
+
+            // 构造 changes/{change-id}/Language_Keys.md 路径
+            string projectRoot = Path.GetDirectoryName(Path.GetDirectoryName(Application.dataPath)); // 从 Assets 向上两级到 D:/se/openspec
+            string changesDir = Path.Combine(projectRoot, "changes", changeId);
+            if (!Directory.Exists(changesDir))
+            {
+                Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] changes/{changeId} 目录不存在，跳过 Language_Keys.md 生成");
+                return;
+            }
+
+            string mdPath = Path.Combine(changesDir, "Language_Keys.md");
+            var lines = new System.Collections.Generic.List<string>
+            {
+                "# Language Keys",
+                "",
+                "| Key | Default Text | Path |",
+                "|-----|--------------|------|"
+            };
+
+            foreach (var (key, text, path) in entries)
+            {
+                // Markdown 表格转义：| 和换行符
+                string escapedText = text.Replace("|", "\\|").Replace("\n", " ").Replace("\r", "");
+                string escapedPath = path.Replace("|", "\\|");
+                lines.Add($"| {key} | {escapedText} | {escapedPath} |");
+            }
+
+            File.WriteAllLines(mdPath, lines, System.Text.Encoding.UTF8);
+            Debug.Log($"[LRUnityLayoutPrefabGenerator] 写入 Language_Keys.md: {mdPath}（{entries.Count} 条）");
         }
     }
 }

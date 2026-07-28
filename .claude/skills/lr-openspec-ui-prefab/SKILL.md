@@ -92,7 +92,7 @@ GrowthFundPage.cs:
 
 只读，不修改：
 
-- `changes/<id>/demo/src/**/*.tsx`——理解已验收的视觉方向、层级关系、文案（React 组件源码，包括拆分的独立组件）
+- `changes/<id>/demo/src/**/*.tsx`——理解已验收的视觉方向、层级关系、文案（React 组件源码，包括拆分的独立组件），**但跳过 `src/components/DebugConsole.tsx`**（`lr-design` 强制产出的调试专用组件，不承载任何业务视觉或状态语义，不纳入分析）
 - `changes/<id>/demo/dist/index.html`（可选）——构建后的静态 HTML，用于坐标测量
 - `.claude/skills/lr-design/references/unity-ui-components.md`——语义组件 ID 白名单
 - [unity-layout-attributes.md](references/unity-layout-attributes.md)——TSX 的 `data-*` 属性规范（本技能专用）

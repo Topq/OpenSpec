@@ -285,11 +285,14 @@ class DocumentConverter:
             lines.append("")
             return
 
+        def cell_text(v) -> str:
+            return "" if v is None else str(v)
+
         # 转换为Markdown表格
         if len(rows) > 0:
             # 第一行作为表头
             header = rows[0]
-            lines.append("| " + " | ".join(str(cell) for cell in header) + " |")
+            lines.append("| " + " | ".join(cell_text(cell) for cell in header) + " |")
             lines.append("| " + " | ".join(["---"] * len(header)) + " |")
 
             # 后续行作为数据
@@ -297,7 +300,7 @@ class DocumentConverter:
                 # 补齐列数
                 while len(row) < len(header):
                     row.append("")
-                lines.append("| " + " | ".join(str(cell) for cell in row) + " |")
+                lines.append("| " + " | ".join(cell_text(cell) for cell in row) + " |")
 
         lines.append("")
 

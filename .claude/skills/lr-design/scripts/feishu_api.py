@@ -243,38 +243,52 @@ class FeishuAPI:
     def get_sheet_content(self, file_token: str) -> Dict:
         """
         获取嵌入电子表格的内容
-        file_token: 文档中sheet块的file_token
-        返回第一个工作表的数据（作为二维数组）
-        """
-        try:
-            # 直接使用file_token作为spreadsheet_token尝试访问
-            # 获取spreadsheet的sheets列表
-            result = self._request(
-                "GET",
-                f"/open-apis/sheets/v2/spreadsheets/{file_token}/metainfo"
-            )
 
-            # 获取第一个sheet的range数据
-            # 假设数据在第一个sheet，使用A1:Z100范围
+        file_token: 文档 sheet 块里的 token，格式为 "{spreadsheet_token}_{sheet_id}"
+        （前半段是电子表格 token，下划线后是该表格里具体的工作表 sheet_id）。
+        返回该 sheet_id 对应工作表的数据（作为二维数组，已裁掉全空的行/列）。
+        """
+        if "_" not in file_token:
+            print(f"获取电子表格内容失败: 无法从 token 解析出 sheet_id: {file_token}")
+            return {"rows": []}
+
+        spreadsheet_token, sheet_id = file_token.rsplit("_", 1)
+
+        try:
             result = self._request(
                 "GET",
-                f"/open-apis/sheets/v2/spreadsheets/{file_token}/values_batch_get",
+                f"/open-apis/sheets/v2/spreadsheets/{spreadsheet_token}/values_batch_get",
                 params={
-                    "ranges": "!A1:Z100",  # 获取前100行，最多26列
+                    "ranges": f"{sheet_id}!A1:AZ500",
                     "valueRenderOption": "ToString",
-                    "dateTimeRenderOption": "FormattedString"
-                }
+                    "dateTimeRenderOption": "FormattedString",
+                },
             )
 
             value_ranges = result.get("data", {}).get("valueRanges", [])
             if value_ranges:
                 values = value_ranges[0].get("values", [])
-                return {"rows": values}
+                return {"rows": self._trim_empty(values)}
 
         except Exception as e:
             print(f"获取电子表格内容失败: {e}")
 
         return {"rows": []}
+
+    @staticmethod
+    def _trim_empty(rows: List[List]) -> List[List]:
+        """裁掉末尾全为空的行，以及所有行末尾全为空的列"""
+        def is_blank(v) -> bool:
+            return v is None or (isinstance(v, str) and v.strip() == "")
+
+        while rows and all(is_blank(v) for v in rows[-1]):
+            rows.pop()
+
+        if not rows:
+            return rows
+
+        max_col = max((i for row in rows for i, v in enumerate(row) if not is_blank(v)), default=-1) + 1
+        return [row[:max_col] for row in rows]
 
     def upload_file(self, file_path: Path, document_id: str) -> Dict:
         """

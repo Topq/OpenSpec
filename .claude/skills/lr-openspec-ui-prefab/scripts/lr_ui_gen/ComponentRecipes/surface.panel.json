@@ -1,0 +1,13 @@
+{
+  "semanticId": "surface.panel",
+  "componentType": "UnityEngine.GameObject",
+  "description": "全屏或主面板根节点。仅包含 RectTransform，按需手动附加 Image 作为背景。",
+  "components": [],
+  "hierarchy": [],
+  "notes": [
+    "surface.panel 是最基础的容器组件",
+    "默认不附加任何组件（仅 RectTransform）",
+    "如果需要背景图，应在 JSON 布局中显式添加 Image 子节点",
+    "通常用作 UI 面板的根节点"
+  ]
+}

@@ -5,19 +5,24 @@
   "hierarchy": [],
   "components": [
     {
-      "type": "UnityEngine.UI.Image",
+      "type": "UnityEngine.UI.RawImage",
       "properties": {
-        "preserveAspect": true,
+        "texture": "Assets/UI/AtlasResources/CommonPanel/jh_frame_08.png",
         "raycastTarget": false
       }
     },
     {
       "type": "LR.AsyncTexture",
-      "properties": {}
+      "properties": {
+        "m_RawImage": "@sibling:UnityEngine.UI.RawImage"
+      }
     }
   ],
+  "postProcess": "async-texture",
   "notes": [
-    "无子节点，只在根节点挂载 Image 和 AsyncTexture 两个组件。",
-    "preserveAspect=true 保持图片宽高比，避免拉伸变形。"
+    "无子节点，只在根节点挂载 RawImage 和 AsyncTexture 两个组件。",
+    "RawImage.texture 设置默认占位图（jh_frame_08.png），运行时由 AsyncTexture 异步加载替换。",
+    "LR.AsyncTexture 的 m_RawImage 字段必须显式绑定到同节点的 RawImage 组件。",
+    "postProcess=async-texture 钩子负责绑定 m_RawImage 引用。"
   ]
 }

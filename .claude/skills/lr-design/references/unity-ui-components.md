@@ -7,27 +7,322 @@
 - 转换器根据语义 ID 创建 Unity 类型、标准层级和附加组件。
 - 功能专用脚本不进入公共白名单；由后续 UI 开发阶段绑定。
 - 扩充白名单前必须扫描项目 Prefab、确定稳定配方，并人工评审本文件。
+- **所有文本组件必须使用 TextMeshProUGUI，禁止使用 UnityEngine.UI.Text**。
 
-## 首批白名单
+## 首批白名单（快速索引）
 
 | 语义 ID | 用途 | Unity 映射/配方 |
 |---|---|---|
 | `surface.panel` | 全屏或主面板根节点 | `RectTransform`，按视觉需要附加 `Image` |
 | `surface.page` | 面板内页面根节点 | `RectTransform`，保留 DOM 子层级 |
 | `surface.modal` | 模态弹窗根节点 | 遮罩层、弹窗容器、阻断点击区域 |
-| `control.button` | 可点击按钮 | `Button`、可点击图形、`LR.RaycastArea` |
+| `control.button` | 可点击按钮 | 见下方详细配置 |
 | `control.toggle` | 二态选择控件 | `Toggle`、选中/未选中视觉、`LR.RaycastArea` |
-| `control.input` | 文本输入控件 | TextMesh Pro 输入组件及占位文本 |
+| `control.input` | 文本输入控件 | 见下方详细配置 |
 | `control.progress` | 进度显示 | `LR.LRProgressBar` 及前景/背景层级 |
 | `list.scroll` | 常规滚动列表 | `ScrollRect`、`Viewport/Content`、裁剪组件 |
-| `list.single-scroll` | 项目单项复用滚动列表 | `LR.SingleScrollView`、`Viewport/Content/PrefabCell`、`RectMask2D`、`LR.RaycastArea` |
-| `content.async-image` | 异步加载大图 | `Image` 与 `LR.AsyncTexture` |
-| `content.async-icon` | 异步加载图标 | 图标容器、`Image` 与 `LR.AsyncTexture` |
-| `text.localized` | 多语言文本 | `TextMeshProUGUI` 与 `LR.Localizer` |
+| `list.single-scroll` | 项目单项复用滚动列表 | 见下方详细配置 |
+| `content.async-image` | 异步加载大图 | 见下方详细配置 |
+| `content.async-icon` | 异步加载图标 | 图标容器、`RawImage` 与 `LR.AsyncTexture` |
+| `text.localized` | 多语言文本 | 见下方详细配置 |
 | `slot.item-icon` | 物品图标业务槽位 | 标准物品图标层级；业务绑定留到 UI 开发阶段 |
 | `feedback.red-point` | 红点提示 | 红点节点与 `LR.UIRedPointWatcher` |
 | `template.tab-item` | 页签复用模板 | 页签标准层级，配合 `data-lr-template`/`data-lr-slot` |
 | `template.reward-cell` | 奖励单元复用模板 | 奖励格标准层级，配合 `data-lr-template`/`data-lr-bind` |
+
+---
+
+## 全局默认样式
+
+所有 TextMeshProUGUI 组件的默认样式（无特殊指定时使用）：
+
+```yaml
+font: Assets/Resources/Font/fzhjtSDF.asset
+fontSharedMaterial: Assets/Resources/Font/fzhjtSDF_UI_Default.mat
+fontSize: 24
+color: "#FFFFFF"
+alignment: Left
+```
+
+**样式覆盖优先级**（从高到低）：
+1. Web 原型 inline style（`style="font-size: 28px; color: #FF0000;"`）
+2. Web 原型 data-lr-style 命名样式（`data-lr-style="title"`）
+3. 组件级默认样式（下方各组件定义）
+4. 全局默认样式（上方定义）
+
+---
+
+## 详细组件配置
+
+### `control.button` - 按钮
+
+**Unity 层级结构**：
+```
+Button (GameObject)
+├── RectTransform
+├── Button 组件
+├── Image 组件
+└── Text (子节点)
+    ├── RectTransform
+    └── TextMeshProUGUI 组件
+```
+
+**默认样式**：
+```yaml
+# 按钮图片 (Image 组件)
+image:
+  type: Sliced  # 九宫格模式，支持拉伸
+  sprite: null  # 留空，由美术后续替换或从 Web 原型指定
+  raycastTarget: true
+
+# 按钮文字 (TextMeshProUGUI 组件)
+text:
+  font: Assets/Resources/Font/fzhjtSDF.asset
+  fontSharedMaterial: Assets/Resources/Font/fzhjtSDF_UI_OutLine1Px.mat  # 按钮文字带 1px 描边
+  fontSize: 24
+  color: "#FFFFFF"
+  alignment: Center
+```
+
+**Web 原型示例**：
+```html
+<!-- 基础按钮（使用默认样式） -->
+<button id="btn-buy" data-lr-component="control.button">购买</button>
+
+<!-- 覆盖字号和颜色 -->
+<button id="btn-special" data-lr-component="control.button" 
+        style="font-size: 28px; color: #FFD700;">
+  特殊按钮
+</button>
+```
+
+---
+
+### `text.localized` - 多语言文本
+
+**Unity 层级结构**：
+```
+Text (GameObject)
+├── RectTransform
+├── TextMeshProUGUI 组件
+└── LR.Localizer 组件
+```
+
+**默认样式**（支持三种命名样式，通过 `data-lr-style` 指定）：
+
+```yaml
+# 默认样式（不指定 data-lr-style 时使用）
+default:
+  font: Assets/Resources/Font/fzhjtSDF.asset
+  fontSharedMaterial: Assets/Resources/Font/fzhjtSDF_UI_Default.mat
+  fontSize: 24
+  color: "#FFFFFF"
+  alignment: Left
+
+# 标题样式（data-lr-style="title"）
+title:
+  font: Assets/Resources/Font/fzhjtSDF.asset
+  fontSharedMaterial: Assets/Resources/Font/fzhjtSDF_UI_TitleLine.mat
+  fontSize: 32
+  color: "#FFD700"  # 金色
+  alignment: Center
+
+# 正文样式（data-lr-style="body"）
+body:
+  font: Assets/Resources/Font/ssfttSDF.asset
+  fontSharedMaterial: Assets/Resources/Font/ssfttSDF_UI_NoOutLine.mat
+  fontSize: 20
+  color: "#E0E0E0"  # 浅灰色
+  alignment: Left
+```
+
+**Web 原型示例**：
+```html
+<!-- 默认样式 -->
+<span data-lr-component="text.localized">普通文本</span>
+
+<!-- 标题样式 -->
+<span data-lr-component="text.localized" data-lr-style="title">成长基金</span>
+
+<!-- 正文样式 -->
+<span data-lr-component="text.localized" data-lr-style="body">活动说明...</span>
+```
+
+---
+
+### `control.input` - 文本输入框
+
+**Unity 层级结构**：
+```
+InputField (GameObject)
+├── RectTransform
+├── TMP_InputField 组件
+├── Image 组件（背景）
+├── TextArea (子节点)
+│   └── Text (TextMeshProUGUI)
+└── Placeholder (子节点)
+    └── Text (TextMeshProUGUI)
+```
+
+**默认样式**：
+```yaml
+# 输入文本
+text:
+  font: Assets/Resources/Font/ssfttSDF.asset
+  fontSharedMaterial: Assets/Resources/Font/ssfttSDF_UI_NoOutLine.mat
+  fontSize: 20
+  color: "#FFFFFF"
+
+# 占位文本
+placeholder:
+  text: "请输入..."
+  font: Assets/Resources/Font/ssfttSDF.asset
+  fontSharedMaterial: Assets/Resources/Font/ssfttSDF_UI_NoOutLine.mat
+  fontSize: 20
+  color: "#808080"  # 灰色
+```
+
+---
+
+### `list.single-scroll` - 单项复用滚动列表
+
+**Unity 层级结构**：
+```
+ScrollView (GameObject)
+├── RectTransform
+├── ScrollRect 组件
+├── LR.SingleScrollView 组件
+└── Viewport (子节点)
+    ├── RectMask2D 组件
+    └── Content (子节点)
+        └── Cell (子节点，模板)
+```
+
+**默认样式**：
+```yaml
+scrollSensitivity: 1.0
+movementType: Elastic  # 弹性滚动
+scrollbar:
+  visibility: AutoHide  # 自动隐藏滚动条
+```
+
+---
+
+### `content.async-image` - 异步加载图片
+
+**Unity 层级结构**：
+```
+AsyncImage (GameObject)
+├── RectTransform
+├── RawImage 组件
+└── LR.AsyncTexture 组件
+```
+
+**默认样式**：
+```yaml
+raycastTarget: false  # 不响应点击（纯展示图片）
+```
+
+**注意**：
+- `LR.AsyncTexture` 的 `m_RawImage` 字段序列化的是 `RawImage`，不是 `Image`
+- `RawImage` 没有 `preserveAspect` 属性（这是 `Image` 独有的）
+- 异步加载后的宽高比由 `AsyncTexture.isSetNativeSize` 或业务代码控制
+
+
+---
+
+### `control.progress` - 进度条
+
+**Unity 层级结构**：
+```
+ProgressBar (GameObject)
+├── RectTransform
+├── LR.LRProgressBar 组件
+├── Bg (子节点，可选)
+│   ├── RectTransform
+│   └── Image 组件
+└── Fill (子节点，必须)
+    ├── RectTransform
+    └── Image 组件
+```
+
+**默认样式**：
+```yaml
+# Fill 前景节点 (Image 组件)
+fill:
+  type: Filled
+  fillMethod: Horizontal
+  fillOrigin: Left
+  fillAmount: 1.0
+  raycastTarget: false
+  
+# LRProgressBar 组件默认值
+progress: 0.0
+widths: [120.0]
+```
+
+**配方依据**：基于 2026-07-27 扫描 770 个 Prefab，178 个 LRProgressBar 实例，所有实例均为单段进度条（`m_TargetImages` 数组长度 = 1）。配方详见 `Assets/Editor/ComponentRecipes/control.progress.json`。
+
+---
+
+### `control.toggle` - 二态切换
+
+**Unity 层级结构**：
+```
+Toggle (GameObject)
+├── RectTransform
+├── Toggle 组件（项目扩展版，含 m_ActiveContentRoot/m_UnActiveContentRoot 字段）
+├── Unselected (子节点)
+│   ├── RectTransform
+│   └── Image 组件
+└── Selected (子节点)
+    ├── RectTransform
+    └── Image 组件
+```
+
+**默认样式**：
+```yaml
+# Toggle 组件
+isOn: false  # 默认未选中
+toggleTransition: Fade  # 淡入淡出动画
+interactable: true
+
+# 两态子节点
+unselected:  # 未选中状态显示
+  raycastTarget: false
+selected:    # 选中状态显示
+  raycastTarget: false
+```
+
+**配方依据**：基于 2026-07-27 扫描 770 个 Prefab，564 个 Toggle 实例，Rank 1 配方占 24.5%（结构高度统一）。项目使用扩展 Toggle，增加了 `m_ActiveContentRoot`/`m_UnActiveContentRoot` 字段。配方详见 `Assets/Editor/ComponentRecipes/control.toggle.json`。
+
+---
+
+### `feedback.red-point` - 红点提示
+
+**Unity 层级结构**：
+```
+RedPointWatcher (GameObject)
+├── RectTransform
+├── LR.UIRedPointWatcher 组件
+└── RedPoint (子节点，追加到最后)
+    ├── RectTransform
+    └── Image 组件
+```
+
+**默认样式**：
+```yaml
+# RedPoint 子节点 (Image 组件)
+redPoint:
+  raycastTarget: false
+  color: "#FF0000"
+  
+# UIRedPointWatcher 组件默认值
+updateInterval: 0.2
+redPointType: None  # 运行时动态设置
+```
+
+**配方依据**：基于 2026-07-27 扫描 770 个 Prefab，245 个 UIRedPointWatcher 实例，Rank 1 配方占 29.0%。红点节点位置不固定（取决于父节点其他子节点数量），新配方采用追加模式（`position: last-child`）。配方详见 `Assets/Editor/ComponentRecipes/feedback.red-point.json`。
 
 ## HTML 属性语义
 

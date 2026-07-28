@@ -98,6 +98,21 @@ def list_sessions(root: Path) -> list[Path]:
     return sorted(sessions, key=lambda p: p.stat().st_mtime, reverse=True)
 
 
+def clean_all_sessions(root: Path) -> int:
+    """清空临时工作区下所有已标记的会话目录,避免跨任务污染。返回清理的数量。"""
+    sessions = list_sessions(root)
+    for session in sessions:
+        shutil.rmtree(session)
+
+    root = root.expanduser().resolve()
+    try:
+        root.rmdir()
+    except OSError:
+        pass  # 不为空(有未标记内容),保留
+
+    return len(sessions)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="lr-design会话管理工具")
     parser.add_argument(
@@ -117,6 +132,9 @@ def main() -> int:
     cleanup_parser = subparsers.add_parser("cleanup", help="安全删除会话目录")
     cleanup_parser.add_argument("session", type=Path, help="会话目录路径")
 
+    # clean命令(清空整个临时工作区)
+    clean_parser = subparsers.add_parser("clean", help="清空临时工作区下所有会话目录")
+
     # list命令
     list_parser = subparsers.add_parser("list", help="列出所有会话")
 
@@ -130,6 +148,10 @@ def main() -> int:
         elif args.command == "cleanup":
             cleanup_session(args.root, args.session)
             print(f"已清理: {args.session}")
+
+        elif args.command == "clean":
+            count = clean_all_sessions(args.root)
+            print(f"已清空 {count} 个历史会话目录")
 
         elif args.command == "list":
             sessions = list_sessions(args.root)

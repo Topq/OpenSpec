@@ -1,0 +1,28 @@
+{
+  "semanticId": "content.async-icon",
+  "componentType": "UnityEngine.GameObject",
+  "description": "异步加载图标组件。用于运行时动态加载的小图标（物品图标、头像等）。",
+  "hierarchy": [],
+  "components": [
+    {
+      "type": "UnityEngine.UI.RawImage",
+      "properties": {
+        "texture": "Assets/UI/AtlasResources/CommonPanel/jh_frame_08.png",
+        "raycastTarget": false
+      }
+    },
+    {
+      "type": "LR.AsyncTexture",
+      "properties": {
+        "m_RawImage": "@sibling:UnityEngine.UI.RawImage"
+      }
+    }
+  ],
+  "postProcess": "async-texture",
+  "notes": [
+    "无子节点，只在根节点挂载 RawImage 和 AsyncTexture 两个组件。",
+    "与 content.async-image 相同的组件结构，语义上区分“图标”与“大图”，尺寸由布局节点的 data-size 决定。",
+    "RawImage.texture 设置默认占位图（jh_frame_08.png，与 content.async-image 复用同一张），运行时由 AsyncTexture 异步加载替换。",
+    "LR.AsyncTexture 的 m_RawImage 字段必须显式绑定到同节点的 RawImage 组件。"
+  ]
+}

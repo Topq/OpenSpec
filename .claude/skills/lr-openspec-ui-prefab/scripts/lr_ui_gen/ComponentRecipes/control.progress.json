@@ -12,7 +12,8 @@
           "type": "UnityEngine.UI.Image",
           "properties": {
             "raycastTarget": false,
-            "color": "#FFFFFF"
+            "color": "#FFFFFF",
+            "sprite": "Assets/UI/AtlasResources/CommonUI/bg2x2.png"
           }
         }
       ],
@@ -36,7 +37,8 @@
             "fillOrigin": "Left",
             "fillAmount": 1.0,
             "raycastTarget": false,
-            "color": "#FFFFFF"
+            "color": "#FFFFFF",
+            "sprite": "Assets/UI/AtlasResources/BossChallengePanel/myzt_line_3.png"
           }
         }
       ],
@@ -55,6 +57,8 @@
     "m_IsPrograssOri": false
   },
   "notes": [
+    "Fill 默认贴图 myzt_line_3.png：进度条本身高度业务化，无压倒性通用素材（Top1 仅 24/178 次），此处选用出现频率最高的样例作为占位图，方便测试人员在正式美术资源到位前看到非空进度条效果；正式接入时应替换为具体活动/面板专属图。",
+    "Bg 默认贴图 bg2x2.png：CommonUI 通用色块图，作为轨道背景占位，同样在正式接入时替换。",
     "所有扫描到的进度条实例都是单段（m_TargetImages 数组长度 = 1），分段进度条不是项目常见模式。",
     "前景节点命名在现有 Prefab 中不统一（Bar/Progress/Fill），新配方统一为 Fill 对齐 Unity Image.Filled 语义。",
     "背景节点可选：Rank 1 有独立 Bg 子节点（15 实例），Rank 2 m_BgNode 指向自己（15 实例）。",
