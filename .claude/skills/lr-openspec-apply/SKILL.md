@@ -356,6 +356,15 @@ apply_instruction = Bash("openspec instructions apply --change {change-id}")
      ]
      ```
 
+   **⚠️ 步骤 2.2.0：生成前先做全表快照（强制，防止误改其他配置表）**
+
+   `output_code_csharp.bat` 是全量工具（`outputcode.exe -i {SOURCETABLEDIR}` 扫描 `design/table/default_ios` 整个目录），`copy_csharp_code.exe` 会把生成结果整体覆盖到 `Assets/Script/Table/`。虽然实测中未涉及的表通常不会被改动（工具只对 `outcode_config.json` 名单命中的表重新生成），但**必须验证**，不能假设：
+
+   ```bash
+   cd D:/se/develop/client/project/Assets/Script/Table
+   find . -type f -name "*.cs" | xargs md5sum > /tmp/table_before.md5
+   ```
+
    **步骤 2.2：生成配置表代码**
    ```bash
    cd D:\se\develop\client\tools\table
@@ -364,6 +373,18 @@ apply_instruction = Bash("openspec instructions apply --change {change-id}")
    cmd /c "D:\se\develop\client\tools\table\output_code_csharp.bat"
    ```
 
+   **⚠️ 步骤 2.2.1：生成后立即比对，还原本次改动之外的文件（强制）**
+
+   ```bash
+   cd D:/se/develop/client/project/Assets/Script/Table
+   find . -type f -name "*.cs" | xargs md5sum > /tmp/table_after.md5
+   diff /tmp/table_before.md5 /tmp/table_after.md5 | grep "^[<>]" | awk '{print $2}' | sort -u
+   ```
+
+   - 差异列表里**只应该出现本次新增/涉及的表**（新表是纯新增文件，diff 不会显示为"改动"；如果差异列表里出现了任何与本次任务无关的表名，说明生成工具把其他表也重新生成了/覆盖了）。
+   - 如果发现意外改动的文件，**必须手动还原**（用备份或版本控制恢复该文件的原内容），不能留着未预期的变更进入后续编译和提交。
+   - 该目录不受 git 管理（`D:/se/develop/client` 不是独立 git 仓库），无法用 `git diff` 兜底，**md5 快照比对是唯一的防线，不能省略**。
+
    **步骤 2.3：验证生成结果**
    - 检查是否生成 4 个文件：
      - `Assets/Script/Table/Generate/{模块}/{表名}/TD{表名}.cs`
@@ -371,6 +392,8 @@ apply_instruction = Bash("openspec instructions apply --change {change-id}")
      - `Assets/Script/Table/Extend/{模块}/{表名}/TD{表名}Extend.cs`
      - `Assets/Script/Table/Extend/{模块}/{表名}/TD{表名}TableExtend.cs`
    - 对比生成的字段列表与 design/config.md 的字段定义是否一致
+   - **确认字段是否为强类型属性（而非全部落入 `extend`/`TDUniversallySet`）**：如果 xlsx 表头第2行属性标记为 `S`（Server-only），客户端代码生成器（`CheckBelongClient` 逻辑）会跳过该字段的强类型成员生成，即使配置了 `NeedParseDataMethod` 也只会生成空壳 `ParseData` 方法体。凡是客户端需要通过 `DynamicConfigModule` 整表同步在本地强类型访问字段的表（参照 `activity_koi_reward.xlsx` 的做法），属性行必须标记为 `A`，不能标 `S`。design/config.md 里"属性建议"章节的结论不能只看文字描述，要用生成后的 `.cs` 文件反向核实。
+   - Extend 目录下的 `TableExtend.cs` 是人工填充骨架，重新生成不会覆盖已有实现——但如果之前手写过 `data.extend.GetInt(...)` 之类的兼容写法，字段变成强类型后要改回 `data.活动id`/`data.xxx` 强类型属性访问，否则会和 Generate 层新增的同名便捷方法（如自动生成的 `GetData(key)`）冲突或不一致。
    - 进入编译验证步骤（步骤 6.5.2）
 
 **禁止操作**：
@@ -384,6 +407,162 @@ apply_instruction = Bash("openspec instructions apply --change {change-id}")
 3. 生成服务端代码（Record 表定义、协议处理、业务逻辑）
 
 ##### [Client] 客户端实现
+
+**⚠️ 强制前置步骤：做任何客户端实现前，先查知识库索引**
+
+在开始编写任何客户端代码前，**必须先读取项目知识库索引**，确认是否有相关文档：
+
+```bash
+Read D:\se\develop\client\project\.claude\skills\common\project_rag\index.md
+```
+
+**根据任务类型，快速定位相关条目**（不用全读，重点看对应章节）：
+
+| 任务类型 | 重点查看的索引条目 | 对应文档路径 |
+|---------|------------------|-------------|
+| 生成 Module 骨架 | 第 10 条（LogicModule）<br>第 11 条（运营活动）| `reference/module.md`<br>`reference/module/activity.md` |
+| 实现 UI 脚本 | 第 5 条（UI）<br>第 7 条（多语言）| `reference/ui.md`<br>`reference/multilanguage.md` |
+| 访问配置表 | 第 4 条（配表）| `reference/table.md` |
+| 时间显示/格式化 | 第 8 条（DateFormatHelper）| `reference/com/dateformathelper.md` |
+| 解析参数字符串 | 第 9 条（ParamReader）| `reference/com/paramreader.md` |
+| 本地配置存储 | 第 12 条（LocalPlayerConfig）| `reference/com/localplayerconfig.md` |
+| 其他任务 | 用 Grep 在 index.md 里搜索关键词 | - |
+
+**执行流程（知识库优先原则）**：
+
+1. **找到相关文档** → Read 详细文档 → 确认参考模块/参考代码
+2. **用 CodeGraph 查询** → 查询标准签名、调用模式（如 `query "method OnInit in MultiSevenDayLoginModule signature"`）
+3. **Read 参考代码** → 读取完整实现，理解上下文和"为什么这样写"
+4. **复制标准模板** → 不要凭直觉编写
+
+**如果 index.md 里没有相关条目**：
+- 用 CodeGraph 搜索类似功能的实现（如 `query "class implements ILogicModule in path:ActivityModule"`）
+- 或用 Grep 搜索关键词（如 `grep -rn "RegisterRecLateHook" --include=*.cs`）
+- 读取至少 2 个参考文件，理解项目规范后再动手
+- 在 tasks.md 记录技术债务："缺少 XXX 主题的知识库文档"
+
+**重要原则**：
+- **知识库文档 > CodeGraph 查询 > 直接读代码**
+- 先看有没有文档总结，再去查代码细节
+- 如果发现知识库与实际代码冲突，**以真实代码为准**，并在 tasks.md 记录文档过期问题
+
+---
+
+**⚠️ 强制前置步骤：新建活动功能模块前先确认目录规约**
+
+如果任务是"生成 XXXModule.cs 骨架"这类**新建活动业务模块**（`ILogicModule` 实现类，代表某个具体活动/玩法功能，如成长基金、锦鲤抽奖、成长计划），**先查一遍项目里同类模块放在哪，不要凭直觉放进 `BusinessActivityModule/` 目录**：
+
+```bash
+find /d/se/develop/client/project/Assets/Script/LogicModule/ActivityModule -maxdepth 1 -type d
+```
+
+1. **目录位置**：具体活动功能模块统一放在 `LogicModule/ActivityModule/{FuncName}Module/` 下（参照 `ActivityDrawKOIModule`、`DevelopPlanModule`、`MarblePlinkoModule`），**不要**放进 `LogicModule/BusinessActivityModule/` —— 那个目录是通用框架本身（`BusinessActivityModule.cs`、`BusinessActivityDefine.cs` 等），不装具体活动的实现。判断标准：如果这个模块要 `m_Kernel.GetModule<BusinessActivityModule>()` 去调用通用框架的方法（红点、进度、菜单），它就是"框架的使用者"，该放 `ActivityModule/` 下，不是"框架本身"。
+
+2. **常量/枚举/数据结构必须独立成 `{FuncName}Define.cs`**，不要塞在 Module 类文件底部或类内部。参照 `MarblePlinkoDefine.cs`、`ActivityDrawKOIDefine.cs` 的结构：
+   ```csharp
+   namespace LR
+   {
+       public static class {FuncName}Define
+       {
+           // 条件类型 / 业务枚举值等常量
+           public const int XXX_TYPE_A = 1;
+       }
+
+       public enum {FuncName}XxxState { ... }   // 命名空间级别的枚举
+       public struct {FuncName}XxxData { ... }  // 命名空间级别的数据结构
+   }
+   ```
+   Module 类里引用时用 `{FuncName}Define.XXX_TYPE_A`，不要在 Module 类内部用 `const int XXX_TYPE_A` 私有声明。
+
+3. **不要迁移的部分**：如果某些常量本来就属于 `BusinessActivityModule` 通用框架（比如 Record 表名 `BA_XXX_REC`、Record 列枚举 `BAXxxRecCol`，这些定义在 `BusinessActivityDefine.cs` 里，是所有活动类型共享的通用结构），不要往下搬到 `{FuncName}Define.cs`——只搬**这个功能专属**的常量/枚举/结构体。
+
+4. **如果任务执行到一半才发现目录放错了**：用 `mv` 移动 `.cs` 文件到正确目录，**同时删除旧位置的 `.meta` 文件**（不要一起 mv，Unity 会在新位置自动生成新 `.meta`；如果该脚本还没有被拖到任何 prefab 上，直接删旧 `.meta` 是安全的）。移动后要检查 design 文档（`design.md`/`design/client.md`/`tasks.md`）里是否也写了旧路径，一并用 `sed` 批量替换掉，不要留着不一致的文档。
+
+**⚠️ 强制前置步骤：检查 demo 定义（UI 相关任务）**
+
+如果任务涉及 UI 脚本（路径包含 `UISript/`、`Panel`、`Page`），**必须先检查 `{功能}/demo/` 目录**：
+
+1. **查找 demo 文件**
+   ```bash
+   find "D:/se/openspec/changes/{change-id}/demo" -iname "*.tsx" -o -iname "*.prefab"
+   ls -la "D:/se/openspec/changes/{change-id}/demo/unity/"
+   ```
+
+2. **对照 demo 定义编写代码**
+   - **⚠️ 优先级：`data-component` 属性 > 注释**。demo 文件顶部的注释可能过期，字段类型以实际 `data-component` 属性为准。
+     ```tsx
+     // 示例：注释写 Slider，但实际是 LRProgressBar
+     // 注释：m_ConditionBar: Slider  ❌ 过期信息
+     <div data-component="control.progress" data-field="m_ConditionBar" />  ✅ 实际组件
+     ```
+   - **组件类型**：demo 里的 `data-component="list.single-scroll"` 对应项目封装 `SingleScrollView`，不是原生 `ScrollRect`
+   - **字段名和类型**：demo 里的 `data-field="m_ScrollRewards"` 必须和 C# 里的 `[SerializeField]` 字段名完全一致
+   - **嵌套组件结构**：demo 里的 `data-field="m_FreeCell"` 指向的子组件，其内部字段（如 `m_BtnClaim`）在该子组件的 C# 脚本里声明，不在父组件里
+   - **模板克隆模式**：demo 里 `data-visible="false"` 的模板节点，`Instantiate` 克隆后必须手动 `SetActive(true)`
+
+3. **禁止行为**
+   - ❌ 跳过 demo 直接根据 `design/ui.md` 的文字描述写代码（ui.md 是抽象描述，demo 才是可执行的具体配置）
+   - ❌ 看到 `list.scroll` 就写 `ScrollRect`，看到 `list.single-scroll` 也写 `ScrollRect`（必须查项目源码确认对应的封装类型）
+   - ❌ 照抄其他页面的字段名（每个 prefab 的序列化字段名可能不同，以 demo 为准）
+
+**常见组件映射表**（通过 demo 里的 `data-component` 属性识别）：
+
+| demo 标签 | 项目组件类型 | 继承关系 | 备注 |
+|----------|------------|---------|------|
+| `list.scroll` | `ScrollView` | 继承 `ScrollRect` | 通用滚动列表基类 |
+| `list.single-scroll` | `SingleScrollView` | 继承 `ScrollView` | 单列/单行滚动列表（项目封装） |
+| `control.progress` | `LRProgressBar` | `MonoBehaviour` | 项目进度条组件，用 `.progress` 属性（0-1）设置进度 |
+| `content.async-image` | `AsyncImage` | 继承 `Image` | 异步加载图片组件 |
+| `feedback.red-point` | `RedPoint` | 自定义组件 | 红点提示组件 |
+
+**如果 demo 目录不存在或为空**，说明该功能的 UI prefab 已由策划/美术在 Unity Editor 里手工搭建完成，你需要：
+1. 在客户端工程 `D:/se/develop/client/project/Assets/Resources/` 下搜索对应 prefab
+2. 用 Unity Editor 打开 prefab，查看已序列化的字段名和组件类型
+3. 或参考同类型功能的已有实现（用 CodeGraph 查询 `BaseActivityPage` 的子类）
+
+**⚠️ 强制规则：UI 文案必须走语言表 key，禁止硬编码字符串（生成时就地替换）**
+
+生成/修改 UI 脚本代码时，任何形如 `m_TxtXxx.text = "中文文案"` 的硬编码字符串赋值，必须在生成阶段直接替换为语言表 key 调用，不写完代码后再扫描修复。
+
+1. **API 选择**
+   - 无参文案：`"{key}".ToLanguage()`（对应 `HelperExtend.cs`，底层 `TDLanguageTable.Get(key)`）
+   - 带参文案（文案里有变量，如"需要达到{0}级"）：`"{key}".ToLanguageF(arg1, arg2, ...)`
+     参考 `ItemUseBtnData.cs:184`：
+     ```csharp
+     FloatMessage.S.ShowError("Msg_ItemUse_LevelNotFit".ToLanguageF(itemData.levelLimit));
+     ```
+   - 不要用 `TableToLanguage()` / `TableToLanguageF()`（`TableUseHelperExtend.cs` 里的旧版本，功能相同但项目里优先用 `HelperExtend.cs` 的 `ToLanguage`/`ToLanguageF`）
+
+2. **key 命名规则**：`UI_<PanelName>_<NodeName>`
+   - `PanelName` = 当前 UI 脚本类名（如 `MixGrowthFundPage`）
+   - `NodeName` = 字段名去掉 `m_Txt`/`m_Lbl` 等前缀（如 `m_TxtBtnPurchase` → `BtnPurchase`）
+   - **NodeName 太长时按寓意缩写**，不要死板保留全名。例如 `m_TxtRewardConditionDescription` 不要写成 `UI_XXX_RewardConditionDescription`，缩写成 `UI_XXX_CondDesc` 或 `UI_XXX_Condition`（取能表达含义的最短形式）
+   - 一个字段有多个文案分支（三元表达式/switch）时，每个分支单独一个 key，NodeName 加状态后缀：
+     ```csharp
+     // ❌ 错误：硬编码
+     m_TxtBtnPurchase.text = isPurchased ? "已购买" : "购买";
+
+     // ✅ 正确：分支各自建 key
+     m_TxtBtnPurchase.text = isPurchased
+         ? "UI_MixGrowthFundPage_BtnPurchase_Purchased".ToLanguage()
+         : "UI_MixGrowthFundPage_BtnPurchase_Buy".ToLanguage();
+     ```
+
+3. **去重规则（范围限定在本次 change 内，不扫全项目语言表）**
+   - 生成前先读取 `changes/{change-id}/Language_Keys.md`（如果不存在则视为空表）
+   - 新文案先按 **Default Text 全字匹配** 检查是否已有相同文案的 key，命中则直接复用该 key，不新建
+   - 未命中才按上面规则生成新 key
+   - **不要跨 change 扫描项目已有语言表**去重（避免误判：文案偶然相同但业务语义不同的两个 key 被错误合并）
+
+4. **`Language_Keys.md` 记录格式**：
+   ```markdown
+   | Key | Default Text |
+   |-----|---------------|
+   | UI_MixGrowthFundPage_BtnPurchase_Buy | 购买 |
+   | UI_MixGrowthFundPage_BtnPurchase_Purchased | 已购买 |
+   ```
+   - 每替换一处硬编码文案，立即追加一行并写回文件（不要攒到最后一次性写，防止 apply 中断丢失记录）
+   - 这份文件是**待导入语言表的清单**，交给策划/美术后续导入 `language.xlsx`，不是最终生效的语言配置
 
 1. 读取 `design/client.md` 对应章节
 2. 用 CodeGraph 查询客户端代码模板（如 `ILogicModule`、`BaseActivityPage`）
@@ -643,6 +822,35 @@ Edit(changes/{change-id}/sync_tasks.py):
   [ ] 2.1 [Config] 策划填写配置表
   [ ] 2.5 [Server] 服务端验证配置加载
   ...
+```
+
+---
+
+### 步骤 10：生成实施报告
+
+执行完成后，自动生成 `changes/{change-id}/implementation-report.md`，记录实施情况供后续验证使用。
+
+#### 报告内容
+
+1. **任务执行摘要** - 已完成/跳过/失败任务统计（按 tag 分类）
+2. **生成文件清单** - 按类型分类（协议/配置表/客户端/服务端）
+3. **编译验证结果** - 客户端/服务端/配置表验证状态
+4. **语言表 key 清单** - 从 `Language_Keys.md` 提取，待导入 `language.xlsx`
+5. **跳过原因说明** - 策划任务、Integration 任务的跳过原因
+6. **问题记录** - 自动修复的编译错误和待人工处理的问题
+7. **后续步骤建议** - 下一步操作清单
+
+#### 输出确认
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+执行完成！
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ 已完成: 29 个任务
+⏭️  已跳过: 16 个任务
+
+📄 实施报告已生成: changes/{change-id}/implementation-report.md
 ```
 
 ---

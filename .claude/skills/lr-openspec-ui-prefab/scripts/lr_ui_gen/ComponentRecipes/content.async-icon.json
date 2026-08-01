@@ -1,7 +1,7 @@
 {
   "semanticId": "content.async-icon",
   "componentType": "UnityEngine.GameObject",
-  "description": "异步加载图标组件。用于运行时动态加载的小图标（物品图标、头像等）。",
+  "description": "异步加载图标组件。专门用于非道具类图标（玩家头像、公会徽章、功能图标等）的运行时异步加载。",
   "hierarchy": [],
   "components": [
     {
@@ -12,7 +12,7 @@
       }
     },
     {
-      "type": "LR.AsyncTexture",
+      "type": "LR.AsyncIcon",
       "properties": {
         "m_RawImage": "@sibling:UnityEngine.UI.RawImage"
       }
@@ -20,9 +20,11 @@
   ],
   "postProcess": "async-texture",
   "notes": [
-    "无子节点，只在根节点挂载 RawImage 和 AsyncTexture 两个组件。",
-    "与 content.async-image 相同的组件结构，语义上区分“图标”与“大图”，尺寸由布局节点的 data-size 决定。",
-    "RawImage.texture 设置默认占位图（jh_frame_08.png，与 content.async-image 复用同一张），运行时由 AsyncTexture 异步加载替换。",
-    "LR.AsyncTexture 的 m_RawImage 字段必须显式绑定到同节点的 RawImage 组件。"
+    "无子节点，只在根节点挂载 RawImage 和 AsyncIcon 两个组件。",
+    "专门用于非道具类图标：玩家头像、公会徽章、功能图标等。",
+    "与 content.async-image 的区别：使用 LR.AsyncIcon 而不是 LR.AsyncTexture。",
+    "与 content.item-icon-root 的区别：后者是道具专用，动态实例化完整组件（包含数量、点击事件等）。",
+    "RawImage.texture 设置默认占位图，运行时由 AsyncIcon 异步加载替换。",
+    "LR.AsyncIcon 的 m_RawImage 字段必须显式绑定到同节点的 RawImage 组件。"
   ]
 }

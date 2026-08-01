@@ -20,10 +20,13 @@
 | `control.toggle` | 二态选择控件 | `Toggle`、选中/未选中视觉、`LR.RaycastArea` |
 | `control.input` | 文本输入控件 | 见下方详细配置 |
 | `control.progress` | 进度显示 | `LR.LRProgressBar` 及前景/背景层级 |
-| `list.scroll` | 常规滚动列表 | `ScrollRect`、`Viewport/Content`、裁剪组件 |
-| `list.single-scroll` | 项目单项复用滚动列表 | 见下方详细配置 |
-| `content.async-image` | 异步加载大图 | 见下方详细配置 |
-| `content.async-icon` | 异步加载图标 | 图标容器、`RawImage` 与 `LR.AsyncTexture` |
+| `list.single-scroll` | 单项复用滚动列表（推荐，性能优化） | 见下方详细配置 |
+| `list.scroll` | 常规滚动列表（仅在不需要复用时使用） | `ScrollRect`、`Viewport/Content`、裁剪组件 |
+| `content.async-image` | 异步加载大图（背景图、立绘等大尺寸图片） | `RawImage` 与 `LR.AsyncTexture`，见下方详细配置 |
+| `content.async-icon` | 异步加载图标（非道具类图标，如头像、功能图标等） | `RawImage` 与 `LR.AsyncIcon` |
+| `content.icon` | UI 状态标识和静态图标（锁定徽章、已领取遮罩、功能入口等），图片在设计期确定 | `UnityEngine.UI.Image`，默认图集贴图，`raycastTarget=false` |
+| `content.item-icon-root` | 运行时 `ItemIconBase.Allocate()` 的挂载点，**专门用于道具展示**（装备、材料、货币等游戏道具） | 空 `GameObject`，只有 `RectTransform`，不挂载任何 UI 组件；字段类型必须是 `Transform` |
+| `content.buff-icon-root` | 运行时 `BuffIcon.Allocate()` 的挂载点，用于动态生成 Buff/Debuff 图标（图标+层数+时间） | 空 `GameObject`，只有 `RectTransform`，不挂载任何 UI 组件；字段类型必须是 `Transform` |
 | `text.localized` | 多语言文本 | 见下方详细配置 |
 | `slot.item-icon` | 物品图标业务槽位 | 标准物品图标层级；业务绑定留到 UI 开发阶段 |
 | `feedback.red-point` | 红点提示 | 红点节点与 `LR.UIRedPointWatcher` |
@@ -208,7 +211,7 @@ scrollbar:
 
 ---
 
-### `content.async-image` - 异步加载图片
+### `content.async-image` - 异步加载大图
 
 **Unity 层级结构**：
 ```
@@ -217,6 +220,11 @@ AsyncImage (GameObject)
 ├── RawImage 组件
 └── LR.AsyncTexture 组件
 ```
+
+**用途**：
+- **专门用于异步加载大尺寸图片**：背景图、立绘、宣传图等
+- 使用 `RawImage` 和 `AsyncTexture` 实现异步加载
+- 区别于 `content.async-icon`（用于非道具图标）和 `content.icon`（静态小图标）
 
 **默认样式**：
 ```yaml
@@ -227,6 +235,66 @@ raycastTarget: false  # 不响应点击（纯展示图片）
 - `LR.AsyncTexture` 的 `m_RawImage` 字段序列化的是 `RawImage`，不是 `Image`
 - `RawImage` 没有 `preserveAspect` 属性（这是 `Image` 独有的）
 - 异步加载后的宽高比由 `AsyncTexture.isSetNativeSize` 或业务代码控制
+
+---
+
+### `content.async-icon` - 异步加载图标（非道具）
+
+**Unity 层级结构**：
+```
+AsyncIcon (GameObject)
+├── RectTransform
+├── RawImage 组件
+└── LR.AsyncIcon 组件
+```
+
+**用途**：
+- **用于异步加载非道具类图标**：玩家头像、公会徽章、功能图标等
+- 使用 `RawImage` 和 `AsyncIcon` 实现异步加载
+- 区别于 `content.item-icon-root`（道具专用，动态实例化完整组件）
+
+**默认样式**：
+```yaml
+raycastTarget: false  # 不响应点击
+```
+
+**典型场景**：
+- 玩家头像框
+- 公会/联盟徽章
+- 动态加载的功能图标
+
+---
+
+### `content.icon` - 静态图标和 UI 状态标识
+
+**Unity 层级结构**：
+```
+Icon (GameObject)
+├── RectTransform
+└── Image 组件
+```
+
+**用途**：
+- **UI 状态标识**：锁定徽章（LockBadge）、已领取遮罩（ClaimedMask）、完成标记等
+- **静态功能图标**：固定的入口图标、装饰图标等
+- 图片在设计期确定，不需要运行时加载
+- 使用图集贴图，性能最优
+
+**默认样式**：
+```yaml
+raycastTarget: false  # 不响应点击（通常由父节点响应）
+sprite: null  # 留空，由美术后续替换或从原型指定
+```
+
+**典型场景**：
+- 状态徽章：锁定、已完成、已领取、新内容提示
+- 装饰图标：标题图标、分隔符、背景装饰
+- 静态功能入口（不需要动态加载的）
+
+**对比其他图标类型**：
+- `content.icon`：静态 `Image`，设计期确定，字段类型 `Image` 或 `GameObject`
+- `content.async-icon`：异步 `RawImage`，运行时加载，字段类型 `RawImage` 或 `GameObject`
+- `content.item-icon-root`：动态容器，运行时实例化完整组件，字段类型 `Transform`
 
 
 ---
@@ -323,6 +391,98 @@ redPointType: None  # 运行时动态设置
 ```
 
 **配方依据**：基于 2026-07-27 扫描 770 个 Prefab，245 个 UIRedPointWatcher 实例，Rank 1 配方占 29.0%。红点节点位置不固定（取决于父节点其他子节点数量），新配方采用追加模式（`position: last-child`）。配方详见 `Assets/Editor/ComponentRecipes/feedback.red-point.json`。
+
+---
+
+### `content.item-icon-root` - 物品图标动态挂载点（用于道具展示）
+
+**Unity 层级结构**：
+```
+ItemIconRoot (GameObject)
+└── RectTransform
+```
+
+**用途**：
+- **专门用于显示游戏道具**（装备、材料、货币、消耗品等）的动态容器
+- 运行时通过 `ItemIconBase.Allocate(Transform parent)` 动态实例化完整的物品图标 Prefab
+- 该 Prefab 包含图片、数量文本、点击事件、选中框等完整功能
+- 不在生成阶段挂载任何 UI 组件，仅作为占位容器
+
+**字段类型要求**：
+```csharp
+[SerializeField] Transform m_ItemIconRoot;  // 或 RectTransform
+```
+
+**运行时调用示例**：
+```csharp
+void ShowReward(int itemId, int count)
+{
+    ItemIconBase itemIcon = ItemIconBase.Allocate(m_ItemIconRoot);
+    itemIcon.SetInfo(itemId, count);
+}
+```
+
+**使用频率**：142 次（项目中最高频的动态 UI 组件），远超 BuffIcon(14)、GoodsIcon(5)、CommonIcon(3)。
+
+**对比其他图标类型**：
+- `content.icon`：静态 `Image` 组件，用于 UI 状态标识（如 LockBadge/ClaimedMask），字段类型 `Image` 或 `GameObject`
+- `content.async-icon`：异步加载非道具图标（如头像），使用 `RawImage` + `AsyncIcon`，字段类型 `RawImage` 或 `GameObject`
+- `content.item-icon-root`：道具专用动态容器，运行时实例化完整组件，字段类型 `Transform`
+
+---
+
+### `content.buff-icon-root` - Buff 图标动态挂载点（用于战斗状态显示）
+
+**Unity 层级结构**：
+```
+BuffIconRoot (GameObject)
+└── RectTransform
+```
+
+**用途**：
+- **专门用于显示战斗 Buff/Debuff 状态图标**（增益、减益、时限效果等）
+- 运行时通过 `BuffIcon.Allocate(Transform parent)` 动态实例化完整的 Buff 图标 Prefab
+- 该 Prefab 包含图标、层数文本、倒计时、呼吸光效等完整功能
+- 不在生成阶段挂载任何 UI 组件，仅作为占位容器
+
+**字段类型要求**：
+```csharp
+[SerializeField] Transform m_BuffIconRoot;  // 或 RectTransform
+```
+
+**运行时调用示例**：
+```csharp
+void ShowBuffIcon(int buffId)
+{
+    BuffIcon buffIcon = BuffIcon.Allocate(m_BuffIconRoot);
+    buffIcon.SetData(buffShowData, startTime);
+}
+```
+
+**使用频率**：14 次（次高频动态 UI 组件）。
+
+**典型场景**：
+- 角色状态栏（显示增益/减益效果列表）
+- 技能面板（显示技能附带的 Buff）
+- 战斗结算（显示触发的 Buff 记录）
+
+---
+
+### 状态 UI 组件说明
+
+**LockBadge / ClaimedMask 等状态指示器**：
+- 这类组件用于显示"锁定""已领取""已完成"等状态
+- 字段类型通常是 `GameObject`（通过 `SetActive` 控制显示/隐藏）
+- **不需要挂载 `AsyncTexture` 或 `AsyncIcon`**，因为它们的图片是静态的（设计期确定）
+- 生成时使用 `content.icon`（会添加 `Image` 组件）
+
+**区分原则**：
+- 需要**运行时异步加载大图**（背景、立绘） → `content.async-image`（挂载 `AsyncTexture`）
+- 需要**运行时异步加载非道具图标**（头像、徽章） → `content.async-icon`（挂载 `AsyncIcon`）
+- 需要**运行时动态实例化完整道具组件** → `content.item-icon-root`（空容器，道具专用）
+- 需要**运行时动态实例化完整 Buff 组件** → `content.buff-icon-root`（空容器，Buff 专用）
+- **静态图片**（设计期确定，如状态徽章） → `content.icon`（`Image` 组件）
+- **纯状态控制**（只需 SetActive，不显示图片） → 空 GameObject（不使用任何 content 组件）
 
 ## HTML 属性语义
 

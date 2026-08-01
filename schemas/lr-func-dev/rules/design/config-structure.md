@@ -344,9 +344,69 @@ CodeGraph 查询：LoadResource READ_FILE txt.ReadInt 配置加载
 - [ ] **静态配置**：打包时从 txt 文件加载，运行时不可调整（如怪物属性、技能配置）
 - [ ] **动态配置**：服务端可在运营期间调整，通过协议推送到客户端（如活动奖励档位、任务目标）
 
+**⚠️ 动态配置的服务端实现核查（阻断性）**：
+
+判定为"动态配置"时，**必须执行以下核查**，禁止凭"机制名听起来通用"就假设不需要服务端改动：
+
+1. **核查 ConfigSyncModule 注册机制**：
+   ```bash
+   # 查找同类活动模块的配置加载实现
+   grep -rn "READ_SYNC_FILE\|READ_FILE" D:/se/develop/server/project/FsGame/ActivityModule/BusinessActivity/{同类模块}
+   ```
+   
+2. **关键判断依据**：
+   - ✅ 若参考模块使用 `READ_SYNC_FILE` 宏 → 该表已接入 ConfigSyncModule 整表同步
+   - ❌ 若参考模块使用 `READ_FILE` 宏 → **该表未接入同步，客户端收不到推送**
+   
+3. **ConfigSyncModule 机制说明**（必读）：
+   - `ConfigSyncModule` **不是全局自动扫描机制**，只同步显式注册的配置表
+   - 注册方式：配置加载时使用 `READ_SYNC_FILE` 宏（而非 `READ_FILE` 宏）
+   - `READ_SYNC_FILE` 宏内部会调用 `load_sync_file()` → `ConfigSyncModule::LoadFile()` 将表注册进 `mFileMap`
+   - 客户端发 `CLIENT_CUSTOMMSG_PULL_CFGSYNC_FILES` 时，服务端只推送 `mFileMap` 中的表
+   
+4. **核查结果处理**：
+   - 若目标模块**已存在**且使用 `READ_FILE`（未接入同步）：
+     - 在 design/server.md 中新增一节「配置同步接入」，说明需要修改加载宏
+     - 在 tasks/server.md 中生成任务「[Server] 修改配置加载宏以接入 ConfigSyncModule」
+   - 若目标模块**尚未实现**（新建模块）：
+     - 在 design/server.md 的「配置加载」章节明确标注"使用 READ_SYNC_FILE 接入整表同步"
+     - 在 tasks/server.md 中生成任务「[Server] 用 READ_SYNC_FILE 加载配置（接入 ConfigSyncModule）」
+   - 若目标模块已使用 `READ_SYNC_FILE`：
+     - 在 design/server.md 中注明"已接入 ConfigSyncModule，无需修改"
+   
+5. **参考案例**：
+   ```cpp
+   // ✅ 正确示例（BATreasureHuntModule::LoadRoutimeCfg）
+   void BATreasureHuntModule::LoadRoutimeCfg(IKernel* pKernel)
+   {
+       READ_SYNC_FILE(m_routimeCfgPath, UnLoadRoutimeCfg)  // ← 用 READ_SYNC_FILE
+       {
+           // ... 解析逻辑
+       }
+       READ_FILE_END;
+   }
+   
+   // ❌ 错误示例（MixGrowthFundModule::LoadMainCfg 初始版本）
+   void MixGrowthFundModule::LoadMainCfg(IKernel *pKernel)
+   {
+       READ_FILE(m_mainCfgPath, UnloadMainCfg)  // ← 用 READ_FILE，不会同步
+       {
+           // ... 解析逻辑
+       }
+       READ_FILE_END;
+   }
+   ```
+
+**禁止的错误假设**：
+- ❌ "ConfigSyncModule 是通用机制，对任意 txt 文件都自动生效"
+- ❌ "活动配置表都会自动同步，不需要服务端改代码"
+- ❌ "只要客户端接入 DynamicConfigModule 就能收到数据"
+
 **本配置表结论**：
 - [ ] 需要添加到 `NeedParseDataMethod`（动态活动配置）
 - [ ] 不需要添加（静态配置或非活动类）
+- [ ] **服务端已接入 ConfigSyncModule**（已使用 READ_SYNC_FILE）
+- [ ] **服务端需接入 ConfigSyncModule**（当前用 READ_FILE，需改为 READ_SYNC_FILE）
 
 **配置示例**：
 ```json

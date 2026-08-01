@@ -6,9 +6,19 @@ import requests
 import json
 import time
 import re
+import io
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
+
+try:
+    from PIL import Image
+    _PIL_AVAILABLE = True
+except ImportError:
+    _PIL_AVAILABLE = False
+
+IMAGE_MAX_DIMENSION = 1600
+IMAGE_JPEG_QUALITY = 85
 
 class FeishuAPIError(Exception):
     """飞书API调用异常"""
@@ -182,14 +192,41 @@ class FeishuAPI:
                     continue
 
                 ext = self._guess_image_ext(response.content)
-                local_path = output_dir / f"{file_token}{ext}"
-                local_path.write_bytes(response.content)
+                local_path = self._save_image(response.content, ext, output_dir, file_token)
                 downloaded[file_token] = local_path
 
             except Exception as e:
                 print(f"图片下载失败 {file_token}: {e}")
 
         return downloaded
+
+    def _save_image(self, content: bytes, ext: str, output_dir: Path, file_token: str) -> Path:
+        """保存图片；PNG/WEBP 统一转 JPG 并限制最大边长，GIF 保留动画原样保存"""
+        if not _PIL_AVAILABLE or ext == '.gif':
+            local_path = output_dir / f"{file_token}{ext}"
+            local_path.write_bytes(content)
+            return local_path
+
+        try:
+            img = Image.open(io.BytesIO(content))
+            if img.mode in ("RGBA", "LA", "P"):
+                background = Image.new("RGB", img.size, (255, 255, 255))
+                rgba = img.convert("RGBA")
+                background.paste(rgba, mask=rgba.split()[-1])
+                img = background
+            else:
+                img = img.convert("RGB")
+
+            if max(img.size) > IMAGE_MAX_DIMENSION:
+                img.thumbnail((IMAGE_MAX_DIMENSION, IMAGE_MAX_DIMENSION), Image.LANCZOS)
+
+            local_path = output_dir / f"{file_token}.jpg"
+            img.save(local_path, "JPEG", quality=IMAGE_JPEG_QUALITY, optimize=True)
+            return local_path
+        except Exception:
+            local_path = output_dir / f"{file_token}{ext}"
+            local_path.write_bytes(content)
+            return local_path
 
     def _guess_image_ext(self, content: bytes) -> str:
         """根据文件头猜测图片扩展名"""

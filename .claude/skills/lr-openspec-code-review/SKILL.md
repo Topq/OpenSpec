@@ -5,18 +5,23 @@ description: 按框架约定清单检查代码质量（协议参数索引、框�
 
 # lr-openspec-code-review
 
-> **职责**: 按项目框架约定清单逐项检查代码，发现违反约定或潜在风险的地方。
+> **职责**: 按项目框架约定清单逐项检查代码，发现违反约定或潜在风险的地方。同时检查完整性（应实施的模块是否存在）和质量（已实施代码是否符合框架约定）。
 > **阶段**: 阶段 11a
-> **依赖**: apply 阶段完成（不依赖 reconcile）
+> **依赖**: tasks.md 和 design.md 已生成（不依赖 apply 完成，可在实施过程中执行）
 
 ---
 
 ## 使用场景
 
 **适用于**：
-- apply 完成后，提交代码前的最后检查
+- 实施过程中或完成后的代码质量检查
+- 提交代码前的最后检查
 - 多人协作，确保所有角色遵守框架约定
-- 发现性能隐患、安全漏洞、框架API误用
+- 发现实施遗漏、性能隐患、安全漏洞、框架API误用
+
+**检查范围**：
+- **完整性检查**：tasks.md 要求的模块/协议/配置是否存在
+- **质量检查**：已实施代码是否符合框架约定
 
 **不检查**：
 - 泛泛的"代码风格"（命名是否美观、注释是否充分）
@@ -47,7 +52,7 @@ description: 按框架约定清单检查代码质量（协议参数索引、框�
 | server-003 | 配置字段名检查 | server-structure.md § 2.1 | 高 |
 | server-004 | Record 查询 null 保护检查 | （隐含规则） | 高 |
 
-#### 客户端检查清单（client 组，共 4 项）
+#### 客户端检查清单（client 组，共 6 项）
 
 | ID | 检查项 | 规则来源 | 严重程度 |
 |----|-------|---------|---------|
@@ -55,6 +60,8 @@ description: 按框架约定清单检查代码质量（协议参数索引、框�
 | client-002 | DettachPage 拼写检查（双 t） | client-structure.md § 2.1 | 高 |
 | client-003 | 红点计算触发时机检查 | client-structure.md 红点规则 | 中 |
 | client-004 | BusinessActivityModule 接入检查 | client-structure.md § 1.1 | 高 |
+| client-005 | 原始协议解析起始索引检查 | client-structure.md § 1.3.1 | 高 |
+| client-006 | BusinessActivity 协议解析起始索引检查 | client-structure.md § 1.3.2 | 高 |
 
 #### 配置表检查清单（config 组，共 2 项）
 
@@ -72,20 +79,96 @@ description: 按框架约定清单检查代码质量（协议参数索引、框�
 
 ---
 
-### 步骤 2：读取实施文件清单
+### 步骤 2：获取实际改动文件（SVN 项目）
+
+**核心思路**：用 SVN 改动状态限定检查范围，避免 CodeGraph 搜索到历史同名模块。
+
+#### 2.1 获取服务端改动文件
 
 ```bash
-Read(changes/{change-id}/implementation-report.md)
+cd D:/se/develop/server/project
+svn status | grep -E "^(M|A)" | awk '{print $2}' > /tmp/server_changed_files.txt
 ```
 
-**提取已实现文件列表**：
-- 服务端: `SourceModule/ActivityModule/MixGrowthFundModule.h`, `.cpp`
-- 客户端: `Assets/Script/LogicModule/.../MixGrowthFundModule*.cs`
-- 客户端 UI: `Assets/Script/UIScript/.../GrowthFundPage.cs`
+**过滤出本功能相关文件**（用 tasks.md 提取的模块名）：
+```bash
+grep -i "MixGrowthFund\|GrowthFund" /tmp/server_changed_files.txt
+```
+
+**示例输出**：
+```
+FsGame/ActivityModule/BusinessActivity/GrowthFund/MixGrowthFundEventCallBack.cpp
+FsGame/ActivityModule/BusinessActivity/GrowthFund/MixGrowthFundModule.h
+FsGame/ActivityModule/BusinessActivity/GrowthFund/MixGrowthFundModule.cpp
+```
+
+**如果为空**：说明服务端未改动（可能已实现），跳过服务端检查或报告"服务端无改动"。
+
+---
+
+#### 2.2 获取客户端改动文件
+
+```bash
+cd D:/se/develop/client/project
+svn status | grep -E "^(M|A)" | awk '{print $2}' > /tmp/client_changed_files.txt
+```
+
+**过滤出本功能相关文件**：
+```bash
+grep -i "MixGrowthFund\|GrowthFund" /tmp/client_changed_files.txt
+```
+
+**示例输出**：
+```
+Assets/Script/LogicModule/BusinessActivityModule/MixGrowthFundModule/MixGrowthFundModule.cs
+Assets/Script/LogicModule/BusinessActivityModule/MixGrowthFundModule/MixGrowthFundModule_Net.cs
+Assets/Script/UIScript/WelfareActivityPanel/MixGrowthFundPanel/MixGrowthFundPage.cs
+Assets/Script/UIScript/WelfareActivityPanel/MixGrowthFundPanel/MixGrowthFundRewardCell.cs
+```
+
+---
+
+#### 2.3 从 tasks.md 提取预期模块名（用于过滤）
+
+```bash
+Read(changes/{change-id}/tasks.md)
+```
+
+**提取关键字**：
+- 服务端模块名：从 "## 3. 服务端实现" 提取（如 `MixGrowthFundModule`）
+- 客户端模块名：从 "## 4. 客户端实现" 提取（如 `MixGrowthFundModule`）
+- 配置表名：从 "## 2. 配置表" 提取（如 `active_fund_main`）
+
+**用途**：作为 `svn status` 输出的 grep 关键词，过滤出相关文件。
+
+---
+
+#### 2.4 完整性检查：对比 tasks.md 和实际改动
+
+**任务文件映射表**（从 tasks.md 提取）：
+- 任务 3.1：服务端 `MixGrowthFundModule.h/cpp`
+- 任务 4.1：客户端 `MixGrowthFundModule.cs`
+- 任务 4.5：客户端 UI `MixGrowthFundPage.cs`
+
+**对比逻辑**：
+- tasks.md 说要改的文件 ∉ svn status 输出 → 报告"缺失实施"
+- svn status 输出的文件 ∉ tasks.md 提到的 → 报告"额外改动"（可能是合理的，需人工确认）
 
 ---
 
 ### 步骤 3：执行服务端检查
+
+**完整性检查前置**：用推断的模块名搜索代码，确认模块存在
+
+```bash
+codegraph_explore("MixGrowthFundModule OnCustom LoadResource", 
+                  projectPath: "D:/se/develop/server/project")
+```
+
+- **找不到** → 报告"缺失实施：预期有服务端 MixGrowthFundModule，但搜索不到"，跳过后续质量检查
+- **找到了** → 继续执行质量检查
+
+---
 
 #### 3.1 协议参数起始索引检查
 
@@ -242,6 +325,96 @@ codegraph_explore("RegisterRedPointCallback BusinessActivityModule MixGrowthFund
 **必需调用**:
 - `RegisterRedPointCallback(BusinessActivityType.MixGrowthFund, OnRedPointCallback)`
 - `RegisterSeverActivityParamArgs(BusinessActivityType.MixGrowthFund, OnRecvInfo)`
+
+---
+
+#### 4.4 原始协议解析起始索引检查（client-005）
+
+**目标**：确认原始协议（AddCustomHook 注册）从索引 0 开始解析
+
+**检查方法**：
+1. 从 tasks.md 提取客户端模块名（如 `MixGrowthFundModule`）
+2. 使用 CodeGraph 搜索协议处理函数：
+```bash
+codegraph explore "OnRecv IVarList GetInt32 <模块名>Module" \
+  --project D:/se/develop/client/project
+```
+
+**检查规则**：
+- ✅ 正确模式：
+  - `int index = 0;` 然后 `args.GetInt32(index++)`
+  - 或直接 `args.GetInt32(0)` 作为第一个参数
+- ❌ 错误模式：
+  - `int index = 1;` 然后 `args.GetInt32(index++)` 作为第一个业务参数
+  - 或直接 `args.GetInt32(1)` 作为第一个业务参数
+
+**报告格式**（若发现错误）：
+```
+❌ client-005: 原始协议解析起始索引错误
+
+文件: XXXModule_Net.cs:123
+函数: OnRecvXXXInfo(IVarList args)
+问题: 从 index=1 开始解析，跳过了第一个业务参数
+
+当前代码:
+  45  void OnRecvXXXInfo(IVarList args)
+  46  {
+  47      int index = 1;  // ← 错误：应从 0 开始
+  48      int param1 = args.GetInt32(index++);
+  49  }
+
+应改为:
+  int index = 0;  // ← 正确：客户端框架已过滤协议号
+  int param1 = args.GetInt32(index++);
+
+原因: 客户端框架接收协议时已过滤索引 0（协议号），业务参数从索引 0 开始
+参考: 搜索其他 Module_Net.cs 中的 OnRecv 方法
+```
+
+---
+
+#### 4.5 BusinessActivity 协议解析起始索引检查（client-006）
+
+**目标**：确认 BusinessActivity 框架的 ParamArgs 方法从 CustomStart（索引 13）开始解析
+
+**检查方法**：
+1. 从 tasks.md 提取客户端模块名（如 `MixGrowthFundModule`）
+2. 使用 CodeGraph 搜索 ParamArgs 方法：
+```bash
+codegraph explore "ParamArgs IVarList BAActivityInfoIndex <模块名>Module" \
+  --project D:/se/develop/client/project
+```
+
+**检查规则**：
+- ✅ 正确模式：`int index = (int)BAActivityInfoIndex.CustomStart;`
+- ❌ 错误模式：`int index = 0;`（会把 ActivityID 误读成业务参数）
+
+**参考实现**：`TrialModule_Config.cs:76`
+
+**报告格式**（若发现错误）：
+```
+❌ client-006: BusinessActivity 协议解析起始索引错误
+
+文件: MixGrowthFundModule_Config.cs:85
+函数: ParamArgs(IVarList args)
+问题: 从 index=0 开始解析，跳过了 13 个 BusinessActivity 固定字段
+
+当前代码:
+  85  public override void ParamArgs(IVarList args)
+  86  {
+  87      int index = 0;  // ← 错误：应从 CustomStart (13) 开始
+  88      m_RechargeId = args.GetInt32(index++);
+  89  }
+
+应改为:
+  int index = (int)BAActivityInfoIndex.CustomStart;  // 索引 13
+  m_RechargeId = args.GetInt32(index++);
+
+原因: BusinessActivity 框架在协议前添加了 13 个固定字段（ActivityID 到 SeasonId）
+      从 index=0 开始会把 ActivityID 误读成 RechargeId
+      
+参考: TrialModule_Config.cs:76
+```
 
 ---
 

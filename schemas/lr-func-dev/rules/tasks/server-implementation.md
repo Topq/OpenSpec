@@ -152,10 +152,20 @@ graph TD
 
 ### 3.2 配置相关
 
-| 任务类型 | CodeGraph 查询 | 参考模块 |
-|---------|---------------|---------|
-| 配置结构体 | `struct ST 配置结构体` | AccrueRechargeModule.h |
-| 配置加载 | `READ_FILE LoadResource txt.ReadInt` | AccrueRechargeModule.cpp |
+| 任务类型 | CodeGraph 查询 | 参考模块 | 说明 |
+|---------|---------------|---------|------|
+| 静态配置加载 | `READ_FILE LoadResource txt.ReadInt` | AccrueRechargeModule.cpp | 打包时加载，运行时不变，不推送客户端 |
+| 动态配置加载（需同步客户端） | `READ_SYNC_FILE LoadResource load_sync_file` | BATreasureHuntModule::LoadRoutimeCfg | 接入 ConfigSyncModule 整表同步，支持运营期间调整 |
+| 配置结构体 | `struct ST 配置结构体` | AccrueRechargeModule.h | 定义配置字段映射 |
+
+**动态配置 vs 静态配置判断依据**：
+- **动态配置**：用于运营活动系统，需要运营期间调整（如活动奖励档位、任务目标）→ 使用 `READ_SYNC_FILE`
+- **静态配置**：游戏打包时固化，运行时不可调整（如怪物属性、技能配置）→ 使用 `READ_FILE`
+
+**READ_SYNC_FILE 宏作用**：
+- 在 `READ_FILE` 基础上额外调用 `load_sync_file()` → `ConfigSyncModule::LoadFile()`
+- 将配置表注册进 `ConfigSyncModule::mFileMap`，客户端才能通过 `CLIENT_CUSTOMMSG_PULL_CFGSYNC_FILES` 拉取
+- 宏参数与 `READ_FILE` 完全一致，只需替换宏名即可接入同步
 
 ---
 

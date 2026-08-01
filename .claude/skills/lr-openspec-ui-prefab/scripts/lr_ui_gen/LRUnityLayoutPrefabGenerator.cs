@@ -52,15 +52,32 @@ namespace LRUIPrefabGen
             string jsonText = File.ReadAllText(jsonPath);
             JObject root = JObject.Parse(jsonText);
 
+            // BuildNode already attaches nested data-lr-component scripts
+            // (e.g. a Row/Cell MonoBehaviour) as it builds the tree, via
+            // ComponentRecipes.AddLRComponentPublic. Only the *page-level*
+            // root script (rootScriptTypeName) needs attaching here.
             GameObject rootGo = BuildNode(root, null);
 
-            var bindings = new Dictionary<string, GameObject>();
-            CollectBindings(root, rootGo, bindings);
-
+            Component rootComponent = null;
             if (!string.IsNullOrEmpty(rootScriptTypeName))
             {
-                AttachScriptAndBindFields(rootGo, rootScriptTypeName, bindings);
+                Type rootType = FindType(rootScriptTypeName);
+                if (rootType == null)
+                {
+                    Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] 未找到脚本类型: {rootScriptTypeName}，跳过挂载和绑定");
+                }
+                else
+                {
+                    rootComponent = rootGo.GetComponent(rootType) ?? rootGo.AddComponent(rootType);
+                }
             }
+
+            // Recursively bind data-field to the *nearest enclosing* script
+            // component -- the page root component, or a nested Row/Cell
+            // component if the field's ancestor chain crosses a
+            // data-lr-component boundary. See CollectAndBindScoped.
+            int boundFieldCount = 0;
+            CollectAndBindScoped(root, rootGo, rootComponent, ref boundFieldCount);
 
             string fullPrefabPath = prefabPath.EndsWith(".prefab") ? prefabPath : prefabPath + ".prefab";
             string dir = Path.GetDirectoryName(fullPrefabPath);
@@ -85,7 +102,7 @@ namespace LRUIPrefabGen
             // 之前用 EditPrefabContentsScope 重新进入编辑模式的方案有状态没对齐，改用这个更直接的路径。
             PostProcessSavedPrefabAsset(root, fullPrefabPath);
 
-            Debug.Log($"[LRUnityLayoutPrefabGenerator] 生成完成: {fullPrefabPath}，字段绑定 {bindings.Count} 个");
+            Debug.Log($"[LRUnityLayoutPrefabGenerator] 生成完成: {fullPrefabPath}，字段绑定 {boundFieldCount} 个");
             return fullPrefabPath;
         }
 
@@ -274,12 +291,58 @@ namespace LRUIPrefabGen
         // Field binding
         // ------------------------------------------------------------------
 
-        static void CollectBindings(JObject node, GameObject go, Dictionary<string, GameObject> bindings)
+        /// <summary>
+        /// Recursively walks the JSON tree and binds each node's data-field
+        /// to whichever script component "owns" it. Ownership is scoped by
+        /// data-lr-component boundaries: a node's data-field binds to
+        /// `currentTarget` (the nearest enclosing script), which starts as
+        /// the page root and switches to a freshly-attached component
+        /// whenever a descendant node carries data-lr-component (e.g. a Row
+        /// or Cell MonoBehaviour). This is what lets two sibling Cell
+        /// instances each bind their own m_BtnClaim etc. without colliding --
+        /// each gets bound against its own component instance rather than a
+        /// single global dictionary keyed by field name.
+        /// </summary>
+        static void CollectAndBindScoped(JObject node, GameObject go, Component currentTarget, ref int boundFieldCount)
         {
+            string lrComponent = (string)node["lrComponent"];
+            Component scopeTarget = currentTarget;
+            if (!string.IsNullOrEmpty(lrComponent))
+            {
+                // BuildNode already added this component while constructing
+                // the tree; fetch the same instance here so bindings land on
+                // this node's own script rather than the enclosing scope's.
+                Type scopeType = FindType(lrComponent);
+                if (scopeType != null)
+                {
+                    scopeTarget = go.GetComponent(scopeType);
+                    if (scopeTarget == null)
+                    {
+                        Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] {lrComponent} 组件未挂载到 {go.name}，字段绑定将回退到外层作用域");
+                        scopeTarget = currentTarget;
+                    }
+                }
+            }
+
+            // A node's OWN data-field belongs to the *enclosing* scope
+            // (currentTarget), not the new scope it may itself open via
+            // data-lr-component -- e.g. FreeCell carries both
+            // data-lr-component="LR.MixGrowthFundRewardCell" (for its
+            // children's fields) and data-field="m_FreeCell" (a field on the
+            // *parent* Row's script, pointing at this Cell instance). Only
+            // descendants use scopeTarget; see the recursive call below.
             string field = (string)node["field"];
             if (!string.IsNullOrEmpty(field))
             {
-                bindings[field] = go;
+                if (currentTarget == null)
+                {
+                    Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] data-field=\"{field}\" 没有可绑定的脚本作用域（未指定根脚本或 data-lr-component），跳过绑定");
+                }
+                else
+                {
+                    FieldBinder.BindField(currentTarget, field, go);
+                    boundFieldCount++;
+                }
             }
 
             var childrenToken = node["children"] as JArray;
@@ -299,7 +362,7 @@ namespace LRUIPrefabGen
                 Transform childTransform = string.IsNullOrEmpty(childName) ? null : FindDescendantByName(go.transform, childName);
                 if (childTransform != null)
                 {
-                    CollectBindings(child, childTransform.gameObject, bindings);
+                    CollectAndBindScoped(child, childTransform.gameObject, scopeTarget, ref boundFieldCount);
                 }
             }
         }
@@ -324,27 +387,6 @@ namespace LRUIPrefabGen
                 }
             }
             return null;
-        }
-
-        static void AttachScriptAndBindFields(GameObject rootGo, string scriptTypeName, Dictionary<string, GameObject> bindings)
-        {
-            Type scriptType = FindType(scriptTypeName);
-            if (scriptType == null)
-            {
-                Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] 未找到脚本类型: {scriptTypeName}，跳过挂载和绑定");
-                return;
-            }
-
-            Component component = rootGo.GetComponent(scriptType);
-            if (component == null)
-            {
-                component = rootGo.AddComponent(scriptType);
-            }
-
-            foreach (var kv in bindings)
-            {
-                FieldBinder.BindField(component, kv.Key, kv.Value);
-            }
         }
 
         // ------------------------------------------------------------------
@@ -571,8 +613,13 @@ namespace LRUIPrefabGen
 
         /// <summary>
         /// Walks a list.single-scroll JSON node's children in lockstep with the real
-        /// Transform hierarchy, looking for the first descendant whose data-field name
-        /// contains "Template", and returns its actual Transform.
+        /// Transform hierarchy, looking for the first descendant that marks itself as
+        /// the reusable cell template, and returns its actual Transform. A node marks
+        /// itself as the template either by carrying data-lr-component (the preferred
+        /// way once the cell has its own MonoBehaviour, e.g. data-lr-component=
+        /// "LR.MixGrowthFundRewardTierRow") or, for backwards compatibility with TSX
+        /// written before that attribute existed, by a data-field name containing
+        /// "Template".
         ///
         /// Important: a data-prefab-child-path wrapper (e.g. "Viewport/Content") does
         /// not create a new GameObject -- BuildChildOrPrefabRef finds the *existing*
@@ -640,8 +687,9 @@ namespace LRUIPrefabGen
                     continue;
                 }
 
+                string lrComponent = (string)child["lrComponent"];
                 string fieldName = (string)child["field"];
-                if (!string.IsNullOrEmpty(fieldName) && fieldName.Contains("Template"))
+                if (!string.IsNullOrEmpty(lrComponent) || (!string.IsNullOrEmpty(fieldName) && fieldName.Contains("Template")))
                 {
                     return childTransform;
                 }

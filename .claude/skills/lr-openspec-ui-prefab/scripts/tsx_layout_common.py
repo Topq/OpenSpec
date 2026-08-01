@@ -47,8 +47,16 @@ class TSXNode:
     def has_prefab_asset_path(self) -> bool:
         return self.attr("data-prefab-asset-path") is not None
 
+    def has_lr_component(self) -> bool:
+        return self.attr("data-lr-component") is not None
+
     def is_layout_relevant(self) -> bool:
-        return self.has_component() or self.has_prefab_child_path() or self.has_prefab_asset_path()
+        return (
+            self.has_component()
+            or self.has_prefab_child_path()
+            or self.has_prefab_asset_path()
+            or self.has_lr_component()
+        )
 
 
 class TSXParseError(Exception):

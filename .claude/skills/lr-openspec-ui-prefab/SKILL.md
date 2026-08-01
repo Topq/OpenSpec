@@ -69,22 +69,24 @@ Web 原型是"视觉稿"，Unity Prefab 需要的是"精确数据"（anchor/pivo
 
 ### 步骤 1：收集字段清单（硬约束）
 
-从 `changes/<id>/tasks.md` 找到 UI 相关任务对应的 C# 脚本路径（如 `GrowthFundPage.cs`、`GrowthFundRewardCell.cs`），逐个读取，提取所有 `[SerializeField]` 字段及其类型：
+从 `changes/<id>/tasks.md` 找到 UI 相关任务对应的 C# 脚本路径，**只提取继承自 AbstractPage/BasePage 的脚本**（如 `MixGrowthFundPage.cs`），读取其所有 `[SerializeField]` 字段及其类型：
 
 ```csharp
-[SerializeField]
-TextMeshProUGUI m_TitleText;
-[SerializeField]
-Button m_BuyButton;
+public class MixGrowthFundPage : BaseActivityPage  // ✅ 继承 Page，需要生成 Prefab
+public class MixGrowthFundRewardCell : MonoBehaviour  // ❌ 普通 MonoBehaviour，不生成独立 Prefab
 ```
+
+**判断规则**：
+- ✅ 继承 `AbstractPage` / `BasePage` / `BaseActivityPage` 等 Page 基类 → 生成独立 Prefab，注册在 UIDataTable
+- ❌ 继承 `MonoBehaviour` → 不生成独立 Prefab，作为嵌套组件在 Page 的 TSX 内部定义
 
 产出字段清单（**每个字段都必须在步骤 3 生成的 TSX 中出现**，不允许挑着画）：
 
 ```text
-GrowthFundPage.cs:
+MixGrowthFundPage.cs (BaseActivityPage):
   m_TitleText: TextMeshProUGUI
   m_BuyButton: Button
-  m_PurchasedMark: Transform
+  m_RewardRowTemplate: MixGrowthFundRewardTierRow  ← 运行时实例化的模板，在 Page TSX 内部定义
   ...
 ```
 
@@ -99,16 +101,19 @@ GrowthFundPage.cs:
 
 ### 步骤 3：生成 TSX
 
-产出位置：`changes/<id>/demo/unity/<PrefabName>.tsx`，一个 Prefab 对应一个文件（如 `GrowthFundPanel.tsx`、`GrowthFundRewardCell.tsx`）。
+**只为继承 Page 基类的脚本生成 TSX 文件**。产出位置：`changes/<id>/demo/unity/<PageClassName>.tsx`（如 `MixGrowthFundPage.tsx`）。
+
+**MonoBehaviour 组件（如 Cell/Row）不生成独立 TSX**，而是在 Page 的 TSX 内部直接定义其层级结构（作为模板节点，运行时通过 `Instantiate` 复用）。
 
 生成规则：
 
 1. 严格遵守 [unity-layout-attributes.md](references/unity-layout-attributes.md)——布局只用 `data-pos`/`data-size`/`data-anchors`/`data-pivot`，不用 CSS。
 2. **以步骤 1 的字段清单为清单式约束**：每个字段生成一个带 `data-field` 的节点。demo 里没有对应视觉元素的字段（如"已购买标记"），补一个节点，可标 `data-visible="false"`，但节点和 `data-field` 必须存在。
 3. 组件类型只能用白名单里的语义 ID，找不到合适 ID 时停下来问，不要发明新 ID。
-4. 需要复用项目已有框架组件内部结构（如 `list.single-scroll` 的 `Viewport/Content`）时用 `data-prefab-child-path`；需要整体实例化已有 Cell/组件 Prefab 时用 `data-prefab-asset-path`。
-5. 视觉细节（图片、圆角、渐变、阴影）不翻译；配套 CSS 只用于基础预览识别。
-6. 根节点画布尺寸固定 `data-size="(1920, 1080)"`。
+4. 需要复用项目已有框架组件内部结构（如 `list.single-scroll` 的 `Viewport/Content`）时用 `data-prefab-child-path`。
+5. **MonoBehaviour 组件字段（如 `MixGrowthFundRewardTierRow m_RewardRowTemplate`）**：在 Page TSX 内部展开该组件的完整层级结构，绑定其所有字段到对应节点，作为运行时实例化的模板。
+6. 视觉细节（图片、圆角、渐变、阴影）不翻译；配套 CSS 只用于基础预览识别。
+7. **只有 Page 根节点**画布尺寸固定 `data-size="(1920, 1080)"`；嵌套组件容器根据实际需要设置尺寸。
 
 发现 React 原型与 C# 字段之间存在结构性矛盾时（比如脚本要三个领取按钮但原型只有一个入口），停止生成，回报使用者，不静默拍板改设计。
 

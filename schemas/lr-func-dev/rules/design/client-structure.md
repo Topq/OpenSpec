@@ -103,7 +103,48 @@ UI 监听 Record 变化，自动刷新
 
 ---
 
-### 1.3 红点系统注册方式
+### 1.3 协议解析起始索引规范（阻断性）
+
+**原始协议**（AddCustomHook 注册）：从索引 0 开始
+
+```csharp
+// ✅ 正确
+void OnRecvXXXInfo(IVarList args) {
+    int index = 0;
+    int param1 = args.GetInt32(index++);
+}
+
+// ❌ 错误：跳过第一个参数
+void OnRecvXXXInfo(IVarList args) {
+    int index = 1;  // 错误
+}
+```
+
+**原因**：客户端框架已过滤协议号，业务参数从索引 0 开始
+
+---
+
+**BusinessActivity 协议**（ParamArgs 继承）：从 CustomStart（索引 13）开始
+
+```csharp
+// ✅ 正确
+public override void ParamArgs(IVarList args) {
+    int index = (int)BAActivityInfoIndex.CustomStart;  // 索引 13
+    int param1 = args.GetInt32(index++);
+}
+
+// ❌ 错误：会把 ActivityID 误读成业务参数
+public override void ParamArgs(IVarList args) {
+    int index = 0;  // 错误
+}
+```
+
+**原因**：框架前 13 个字段（ActivityID 到 SeasonId）是固定字段
+**参考**：`TrialModule_Config.cs:76`
+
+---
+
+### 1.4 红点系统注册方式
 
 **注册方式选择**（框架约定）：
 
@@ -167,11 +208,24 @@ THEN 必须走 DynamicConfigModule 同步流程
 ELSE 协议实时下发即可
 ```
 
-**接入步骤**（固定流程）：
+**接入步骤**（固定流程，⚠️ 缺任何一步都会导致运行时数据为空，编译不会报错）：
 1. 修改 `D:\se\develop\public\table_config\outcode_config.json`
 2. 执行 `output_code_csharp.bat` 重新生成代码
 3. 实现 `TDXxxTableExtend.cs`（3 个方法：`InsertDynamicData`, `ParseComplete`, `ClearDynamicData`）
-4. 在 `DynamicConfigModule_Process.cs` 注册
+4. 在 `DynamicConfigModule_Process.cs::InitProcessDic()` 中调用 `RegisterTable(...)`（表级注册，让 `DynamicConfigModule` 认得这张表的强类型解析方法）
+5. **活动所属的业务 Module 必须实现 `IConfigSyncMethod` 接口，并在 `OnInit()` 中调用 `m_DynamicConfigModule.RegisterSyncMethod(this)`**（活动级注册，让 `DynamicConfigModule` 知道"打开这个活动时要拉取哪些表"）
+   - `fileNameList`：活动面板打开时（`BusinessActivityModule.RequestActivityInfo` → `DynamicConfigModule.StartLoadFile`）才拉取的表
+   - `preFileNameList`：活动面板打开前就要提前拉取的表（如红点判断依赖的表），可为空数组
+   - 表名字符串必须与步骤 1 中 `outcode_config.json` 注册的表名完全一致（建议定义为 `{FuncName}Define.cs` 中的 `const string`，避免拼写不一致）
+
+**步骤 4 和步骤 5 是两个独立的注册维度，缺一不可**：
+- 只做步骤 4（`RegisterTable`）不做步骤 5（`RegisterSyncMethod`）→ 表能被解析，但没有任何活动会主动去拉取这张表的数据，`TDXxxTable.GetData()` 永远返回空/默认值，且没有任何编译错误或运行时报错提示（因为这张表在其他场景下可能已被其他活动拉取过，容易被误判为"能用"）
+- 只做步骤 5 不做步骤 4 → 编译报错（`RegisterTable` 找不到 `InsertDynamicData` 等生成方法）
+
+**验证方式（设计与实施阶段都必须检查）**：
+- 在目标业务 Module 的 `.h`/`.cs` 声明处（或 CodeGraph 查询该 Module）确认实现了 `IConfigSyncMethod`
+- 在该 Module 的 `OnInit()` 中确认存在 `m_DynamicConfigModule.RegisterSyncMethod(this)` 调用
+- 参考正确实现：`ActivityDrawKOIModule`（`ActivityDrawKOIModule_Message.cs` 实现接口 + `ActivityDrawKOIModule.cs::OnInit()` 调用 `RegisterSyncMethod`）、`MarblePlinkoModule`
 
 **详细说明**：参考 `tmp/design-client-implementation-details.md`（若存在）
 

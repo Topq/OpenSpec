@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from feishu_api import FeishuAPI, FeishuAPIError
 from document_converter import DocumentConverter, DocumentMetadata
 from manage_session import clean_all_sessions, create_session
+from filter_art_sections import filter_art_sections, clean_unreferenced_images
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 
@@ -118,6 +119,21 @@ def download_document(api: FeishuAPI, converter: DocumentConverter,
 
     working_md = session_dir / "working.md"
     working_md.write_text(markdown, encoding="utf-8")
+
+    # 过滤美术需求章节
+    filtered_markdown, removed_sections = filter_art_sections(markdown)
+    if removed_sections:
+        working_md.write_text(filtered_markdown, encoding="utf-8")
+        print(f"已过滤 {len(removed_sections)} 个美术需求章节:")
+        for section in removed_sections:
+            print(f"  - {section}")
+
+    # 清理未被 working.md 引用的图片(章节被过滤后，其图片引用也一并消失)
+    deleted_images = clean_unreferenced_images(working_md, session_dir / "images")
+    if deleted_images:
+        print(f"已删除 {len(deleted_images)} 个未引用的图片:")
+        for img in deleted_images:
+            print(f"  - {img}")
 
     with open(session_dir / "blocks.json", "w", encoding="utf-8") as f:
         json.dump(blocks, f, ensure_ascii=False, indent=2)

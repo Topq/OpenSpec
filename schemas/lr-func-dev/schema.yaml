@@ -162,8 +162,12 @@ artifacts:
       1. 按 config-structure.md 定义的章节结构组织内容
       2. 必须包含"设计阶段配置表变更"章节（新增表、补充字段、关联变更）
       3. 必须包含"配置表生成和使用机制"章节（策划/服务器/客户端三端流程）
-      4. 每个配置表必须列出完整字段定义
-      5. 未确认的字段类型、枚举值、默认值必须列入 ## Open Questions 章节
+      4. 每个配置表必须列出完整字段定义，且字段定义表必须包含"属性"列，每个字段标注 S/C/A（不允许留空或"待定"）：
+         - 判断依据是"客户端是否会本地生成/加载 TDXXXTable.cs 获得这个值"，不是"客户端逻辑是否需要这个值"
+         - 若该表数据完全通过协议动态下发给客户端（客户端不生成对应 TDXXXTable.cs），即使客户端业务逻辑用到了该字段，仍标 S
+         - 详细规则见 config-structure.md 的"属性列说明"和"判断依据"
+      5. 每个配置表末尾必须给出"客户端代码生成配置"结论：need_copy 是否需要添加、NeedParseDataMethod 是否需要添加（均需勾选，不能空着）
+      6. 未确认的字段类型、枚举值、默认值必须列入 ## Open Questions 章节
 
       **Open Questions 格式**：
       ### Q: [问题描述]
@@ -359,9 +363,36 @@ artifacts:
       - 不生成 design.md
       - 状态标记为 blocked
 
+      **第 1.5 步：配置表 S/C/A 属性完整性检查（阻断性）**
+
+      读取 design/config.md 中所有配置表的"字段定义"表格：
+      1. 表头必须包含"属性"列
+      2. 该列每一行必须是 S / C / A 三者之一，不得留空、写"待定"，或用"客户端使用/服务器使用"的是否值代替
+      3. 每张表末尾必须有"客户端代码生成配置"章节，且 need_copy / NeedParseDataMethod 的结论必须已勾选（不是两个选项都未勾选）
+
+      若发现字段定义表缺少"属性"列，或存在未标注 S/C/A 的字段，或 need_copy/NeedParseDataMethod 结论未勾选：
+      - 输出错误报告：
+        ```
+        ❌ 配置表属性标注检查未通过
+
+        design/config.md:
+          - 表 active_fund_main.xlsx 字段定义表缺少"属性"列
+          - 表 activity_mix_growthfund_reward.xlsx 的 FreeHighlight 字段未标注 S/C/A
+          - 表 active_fund_main.xlsx 的 need_copy/NeedParseDataMethod 结论未勾选
+
+        判断依据（不能用"客户端使用"列代替）：
+          - 字段是否出现在客户端生成的 TDXXXTable.cs 中，而非"客户端逻辑是否需要这个值"
+          - 若该表数据完全通过协议动态下发（客户端不本地加载此表），即使客户端业务逻辑用到了该值，仍标 S
+
+        请回到 design/config.md 补全属性标注，然后重新运行：
+        openspec instructions design --change <id>
+        ```
+      - 不生成 design.md
+      - 状态标记为 blocked
+
       **第二步：跨文档对齐检查（阻断性）**
 
-      在 Open Questions 检查通过后，执行跨文档对齐检查：
+      在 Open Questions 检查、配置表属性完整性检查通过后，执行跨文档对齐检查：
 
       1. **Record 表对齐**
          - 提取 design/client.md 和 design/server.md 中所有 Record 表定义

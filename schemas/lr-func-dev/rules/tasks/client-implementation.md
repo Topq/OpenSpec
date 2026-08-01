@@ -102,6 +102,26 @@
 
 ---
 
+### ⚠️ 配置表接入 DynamicConfigModule 有两级注册，任务清单必须各出一条任务（阻断性）
+
+**背景**：步骤 1-4（`outcode_config.json` + `output_code_csharp.bat` + `TDXxxTableExtend.cs` + `DynamicConfigModule_Process.cs::RegisterTable`）只完成了**表级注册**——让框架认得这张表怎么解析。这一步做完后编译能通过，`TDXxxTable` 类也存在，很容易被误判为"已经接入完成"。
+
+**但表级注册之外还有活动级注册**：必须有某个业务 Module 实现 `IConfigSyncMethod` 接口，把这张表的表名放进它的 `fileNameList`，并在该 Module 的 `OnInit()` 里调用 `m_DynamicConfigModule.RegisterSyncMethod(this)`。这一步告诉框架"玩家打开这个活动时，需要主动去拉取这些表的数据"。**没有这一步，`TDXxxTable.GetData()` 永远返回空/默认值，且编译和运行时都不会报错**（因为查表接口本身是合法调用，只是数据从未被拉取过）。
+
+**任务清单生成要求**：
+- 凡是给活动模块（`XxxModule.cs`）新增了通过 `DynamicConfigModule` 整表同步的配置表，任务清单里必须包含一条独立任务，明确写出：
+  1. `XxxModule` 声明实现 `IConfigSyncMethod`
+  2. 在 `fileNameList`（或 `preFileNameList`，视是否需要提前加载而定）中列出新增的表名
+  3. 在 `OnInit()` 中调用 `m_DynamicConfigModule.RegisterSyncMethod(this)`
+- 不能把这一步隐含在"创建 XxxModule.cs 骨架"这类笼统任务描述里——必须单独列出，避免被漏掉（`RegisterTable` 任务完成后容易误以为"配表已经通了"就此止步）
+- 代码模板查询：`codegraph explore "IConfigSyncMethod RegisterSyncMethod fileNameList"`，参考模块：`ActivityDrawKOIModule`、`MarblePlinkoModule`
+
+**验证方式**：
+- 编译通过（`XxxModule : ILogicModule, IConfigSyncMethod` 无缺失成员报错）
+- 运行时打开该活动面板后，`TDXxxTable.GetData(id)` 能读到非默认值（而非表级注册验证只看"编译通过、类存在"）
+
+---
+
 ## 0.2 UI 脚本注册规范（强制）
 
 **继承 AbstractPage（或其子类如 BaseActivityPage）的 UI 脚本必须注册到 UIDataTable**。
@@ -282,26 +302,7 @@ graph TD
 
 ## 三、特殊任务类型
 
-### 3.1 手工任务（非代码实现）
-
-**标注方式**：
-```markdown
-### 任务 X：运行 output_code_csharp.bat 生成配置表代码
-
-**任务类型**: ⚠️ 手工任务（非代码实现）
-
-**操作步骤**:
-1. 打开终端，进入 `D:\se\develop\client\tools\table\`
-2. 执行 `output_code_csharp.bat`
-3. 检查 `Assets/Script/Table/Data/` 下是否生成 `TDGrowthFundTable.cs`
-
-**验证方式**:
-- 生成的文件无编译错误
-```
-
----
-
-### 3.2 配置任务（修改配置文件）
+### 3.1 配置任务（修改配置文件）
 
 **标注方式**：
 ```markdown
@@ -320,6 +321,29 @@ TDGrowthFundTable.metaData,
 **验证方式**:
 - 运行客户端，检查配置表能正常加载
 ```
+
+---
+
+### 3.2 配置表代码生成任务（自动执行）
+
+**说明**：`output_code_csharp.bat` 是无交互的批处理脚本，可直接通过 Bash 工具调用执行，无需人工介入。
+
+**标注方式**：
+```markdown
+### 任务 X：运行 output_code_csharp.bat 生成配置表代码
+
+**目标路径**: D:/se/develop/client/tools/table/
+
+**依赖**: 任务 Y（outcode_config.json 已添加表名）
+
+**操作步骤**: 运行 output_code_csharp.bat，生成 TDXxx.cs / TDXxxTable.cs 及对应 Extend.cs 文件
+
+**验证方式**:
+- 生成的文件无编译错误
+- ParseData 方法字段与 design.md 附录 C 一致
+```
+
+**注意**: 此任务不标记为"手工任务"，执行时直接调用 `output_code_csharp.bat` 并检查生成结果。
 
 ---
 
@@ -353,6 +377,60 @@ TDGrowthFundTable.metaData,
 | Panel 结构 | `AbstractPanel OnOpen OnClose` | - | UI 文本必须用 TextMeshProUGUI（变量名 `m_TxtXxx`），禁用 UnityEngine.UI.Text |
 | 列表刷新 | `OnCellUpdated Transform index` | - | - |
 | 文本赋值 | `TextMeshProUGUI.text` | - | 引用命名空间 `using TMPro;` |
+
+#### 4.3.1 动态组件容器（*-root 类组件）
+
+**适用场景**：demo 中使用 `data-component="content.item-icon-root"` 或 `content.buff-icon-root` 等动态容器组件时
+
+| 容器类型 | 字段类型约束 | 运行时 API | 数据解析 | 点击行为模式 | 参考案例 |
+|---------|------------|-----------|---------|-------------|---------|
+| content.item-icon-root | Transform | UIHelper.GetOrAllocate<ItemIconBase>(m_Root) | rewardStr.ToItemGroup() | 状态驱动：可操作→业务回调，不可操作→OpenItemTips | MixGrowthFundRewardCell.cs |
+| content.buff-icon-root | Transform | BuffIcon.Allocate(m_Root) | - | 静态显示，无点击 | - |
+
+**ItemIconBase 标准使用模板**：
+
+```csharp
+// 1. 字段声明（Prefab 生成器已自动绑定 Transform 字段）
+[SerializeField] Transform m_ItemIconRoot;
+ItemIconBase m_ItemIcon;  // 缓存组件引用
+
+// 2. 运行时动态创建并设置数据
+void SetData(string rewardStr, CellClaimState state, System.Action onClaim)
+{
+    // 解析奖励串（格式: "itemID:count"，如 "1003:188"）
+    ItemGroup item = rewardStr.ToItemGroup();
+    
+    // 从对象池获取/创建 ItemIconBase（禁止 new ItemIconBase()）
+    m_ItemIcon = UIHelper.GetOrAllocate(m_ItemIconRoot);
+    m_ItemIcon.SetInfo(item.itemID, item.count);
+    
+    // 3. 根据业务状态设置点击行为（状态驱动模式）
+    if (state == CellClaimState.Claimable)
+    {
+        // 可操作状态：触发业务回调（如领奖、购买）
+        m_ItemIcon.onClick = (ItemIconBase icon) => {
+            onClaim?.Invoke();
+        };
+    }
+    else
+    {
+        // 不可操作/已完成状态：查看道具详情
+        m_ItemIcon.onClick = (ItemIconBase icon) => {
+            BagHelper.OpenItemTips(null, icon.configID, false, null, AlignAdjuster.AlignType.Auto);
+        };
+    }
+}
+```
+
+**常见错误（阻断性）**：
+- ❌ 字段类型写成 `GameObject` 或 `ItemIconBase`（**必须是 `Transform` 或 `RectTransform`**）
+- ❌ 忘记根据状态切换 `onClick` 回调（导致已领取还能重复触发业务逻辑）
+- ❌ 使用 `new ItemIconBase()` 直接实例化（**必须用 `UIHelper.GetOrAllocate` 从对象池获取**）
+- ❌ 未引用 `using SoulEngine;`（`UIHelper` 在此命名空间）
+
+**判断是否需要状态驱动模式**：
+- ✅ 需要：奖励格子（可领取/已领取）、商品格子（可购买/已购买）、任务格子（可完成/已完成）
+- ❌ 不需要：纯展示的道具列表、背包格子（点击只查看详情）
 
 ---
 
