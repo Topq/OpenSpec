@@ -110,6 +110,12 @@ graph TD
 
 ---
 
+## 可选工具
+
+- `/lr-openspec-sync <id>`：不绑定固定阶段，随时可用，扫描代码 vs design.md 差异并回写遗漏，推荐在 test-validate 后代码稳定时运行一次。
+
+---
+
 ## 产物依赖图
 
 ```mermaid

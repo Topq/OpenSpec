@@ -27,6 +27,9 @@ rules:
     - Impact 必须明确标出三端各自受影响的区域和不涉及的区域。
   design:
     - 合并前必须确保三端的 Open Questions 全部解决。
+  design-client:
+    - 客户端状态缓存结构体（如 XxxStatus）中，若字段不是直接从 Record/协议原始字段 1:1 映射（例如需要额外计算、或来自另一个模块的查询结果），设计文档必须在"交互流程"或"数据同步"章节明确指出该字段在哪个回调/方法中被赋值，不能只在结构体定义处声明字段而不说明写入路径。
+    - 若同一个 BusinessActivityType 允许同时存在多个活动实例（activityId 不同），设计文档中涉及遍历状态缓存字典（如 m_RewardStatuses）的判断逻辑（红点计算、进度汇总等）必须在伪代码中显式包含 activityId 过滤条件，不能假设"字典里只有当前活动的数据"。
   tasks:
     - 任务必须使用 [Contract]、[Config]、[Server]、[Client]、[Integration] 分类。
     - 业务逻辑任务必须标注"对应验收：TC-xxx"。

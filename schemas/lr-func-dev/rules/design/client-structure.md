@@ -103,6 +103,24 @@ UI 监听 Record 变化，自动刷新
 
 ---
 
+### 1.2a 派生状态字段的赋值时机（强制）
+
+若客户端状态缓存结构体中的字段不是 Record/协议原始字段的直接映射（如需要跨模块查询、
+或由多个来源组合得到），设计文档必须明确指出：
+1. 该字段在哪个回调函数中被赋值（如 `ParseQueryInfo`、`OnXxxRecChanged`）
+2. 赋值的数据来源（如"来自 ActivityGoalModule.QueryGoalProgress 返回的进度数据"）
+
+**检查方法**：对比"客户端状态缓存"章节声明的字段列表 与 "交互流程"/"协议解析"章节提到的
+赋值语句，若某字段只在结构体定义处出现、在流程描述中找不到对应的赋值来源，视为设计缺口，
+必须补充说明后才能合并。
+
+**多实例场景的状态遍历（强制）**：若同一个 BusinessActivityType 允许同时存在多个活动实例
+（activityId 不同），设计文档中涉及遍历状态缓存字典（如 `m_RewardStatuses`）的判断逻辑
+（红点计算、进度汇总等）必须在伪代码中显式包含 activityId 过滤条件，不能假设"字典里只有
+当前活动的数据"。
+
+---
+
 ### 1.3 协议解析起始索引规范（阻断性）
 
 **原始协议**（AddCustomHook 注册）：从索引 0 开始
@@ -195,7 +213,23 @@ CodeGraph 查询：AttachPage DettachPage Panel
 
 ---
 
-### 2.2 配置表访问约定
+### 2.3 UI 文件组织规范
+
+**规则**：同一功能模块的所有 UI 组件（Page/Panel/Cell）必须在同一文件夹下。
+
+**结构**：
+```
+UISript/<父级>/<功能模块>/
+├── <功能>Page.cs
+├── <功能>Panel.cs
+└── <功能>Cell.cs
+```
+
+**禁止**：按 Panel 类型分散（如 MonthCardPage/、MonthCardPanel/、MonthCardGiftPanel/）
+
+**原因**：功能内聚，删除功能时只需删除一个文件夹。
+
+---
 
 **DynamicConfigModule 接入判断**（架构决策）：
 
