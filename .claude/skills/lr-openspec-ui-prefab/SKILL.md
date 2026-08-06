@@ -111,7 +111,7 @@ MixGrowthFundPage.cs (BaseActivityPage):
 2. **以步骤 1 的字段清单为清单式约束**：每个字段生成一个带 `data-field` 的节点。demo 里没有对应视觉元素的字段（如"已购买标记"），补一个节点，可标 `data-visible="false"`，但节点和 `data-field` 必须存在。
 3. 组件类型只能用白名单里的语义 ID，找不到合适 ID 时停下来问，不要发明新 ID。
 4. 需要复用项目已有框架组件内部结构（如 `list.single-scroll` 的 `Viewport/Content`）时用 `data-prefab-child-path`。
-5. **MonoBehaviour 组件字段（如 `MixGrowthFundRewardTierRow m_RewardRowTemplate`）**：在 Page TSX 内部展开该组件的完整层级结构，绑定其所有字段到对应节点，作为运行时实例化的模板。
+5. **MonoBehaviour 组件字段（如 `MixGrowthFundRewardTierRow m_RewardRowTemplate`）**：在 Page TSX 内部展开该组件的完整层级结构，绑定其所有字段到对应节点，作为运行时实例化的模板。展开时同样要对照 demo 里对应组件（如 `MonthCard.tsx`）的完整视觉内容，不能只按字段清单画节点——字段清单保证"有字段的节点不缺"，但 demo 里存在、没有对应字段的纯展示文案（如分组小标题）依然要画出来，不能因为找不到 `data-field` 就跳过。
 6. 视觉细节（图片、圆角、渐变、阴影）不翻译；配套 CSS 只用于基础预览识别。
 7. **只有 Page 根节点**画布尺寸固定 `data-size="(1920, 1080)"`；嵌套组件容器根据实际需要设置尺寸。
 
