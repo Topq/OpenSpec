@@ -176,10 +176,132 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/deploy_lr_ui_gen.py <unity-p
 
 ### 步骤 7：验证结果
 
-1. 用 `mcp__ai-game-developer__gameobject-find` 或打开 Prefab 检查层级是否符合预期。
-2. 用 `mcp__ai-game-developer__screenshot-isolated` 截图确认视觉效果。
-3. 检查 Unity Console 是否有 `LRComponentRecipes`/`LRFieldBinder` 的 Warning（说明某个语义 ID 或字段没找到对应实现，需要回头修 TSX 或补白名单/生成器逻辑）。
-4. 向使用者报告：生成了哪些 Prefab、绑定了多少字段、有哪些遗留 Warning。
+生成 Prefab 后，必须执行以下验证步骤：
+
+#### 7.1 层级结构验证
+
+使用 `mcp__ai-game-developer__gameobject-find` 检查 Prefab 层级：
+
+**检查项**：
+- ✅ 根节点名称正确（与类名一致，如 `MonthCardGiftPanel`）
+- ✅ 根节点有 Canvas + GraphicRaycaster + 脚本组件
+- ✅ 符合项目标准结构（对于 Panel）：
+  ```
+  XxxPanel (根节点)
+  ├── Screen (遮罩层)
+  └── Window (弹窗容器)
+      └── Root (内容容器)
+          └── 实际UI元素
+  ```
+- ✅ 所有命名节点（data-name）都存在
+
+**示例命令**：
+```javascript
+mcp__ai-game-developer__gameobject-find({
+  gameObjectRef: {assetPath: "Assets/Resources/PanelUI/.../XxxPanel.prefab"},
+  hierarchyDepth: 3,
+  includeComponents: true
+})
+```
+
+**常见问题**：
+- Screen 节点缺失 → TSX 中使用了自闭合标签 `<div ... />`，改为 `<div ...></div>`
+- 根节点名称错误 → Unity SaveAsPrefabAsset 强制改名，检查文件名是否与 TSX 根节点一致
+
+#### 7.2 字段绑定完整性验证
+
+**检查项**：
+- ✅ 绑定字段总数 = 步骤 1 中收集的字段总数
+- ✅ 包括主 Panel 的所有字段
+- ✅ 包括所有内嵌组件（XXXCell、XXXRow）的字段
+
+**验证方法**：
+
+1. 统计步骤 1 的字段清单总数（包括所有内嵌组件）
+2. 检查生成日志或校验报告中的绑定数量
+3. 如果数量不一致，回到步骤 1 检查是否漏掉内嵌组件
+
+**常见问题**：
+- 字段数量少于预期 → 漏掉了某个内嵌组件（如 List<XXXCell> 对应的 Cell 脚本）
+- 字段数量多于预期 → TSX 中有多余的 data-field 绑定
+
+#### 7.3 内嵌组件模板验证
+
+对于包含内嵌组件的 Prefab，必须检查模板节点是否存在：
+
+**检查项**：
+- ✅ 每个 `List<XXXCell>` 对应的容器下有模板节点
+- ✅ 模板节点包含 `data-lr-component="LR.XXXCell"` 对应的组件
+- ✅ 模板节点包含该组件的所有字段
+- ✅ 模板节点设置为隐藏（activeSelf: true, activeInHierarchy: false）
+
+**示例**：检查容器下是否有模板子节点
+```javascript
+mcp__ai-game-developer__gameobject-find({
+  gameObjectRef: {
+    assetPath: "Assets/Resources/.../XxxPanel.prefab",
+    path: "XxxPanel/.../ContainerRoot/XxxCell"
+  },
+  includeComponents: true
+})
+```
+
+**预期结果**：找到节点、有对应组件、字段完整
+
+**常见问题**：
+- 模板节点不存在 → 回到步骤 3，在容器下添加模板节点（data-visible="false"）
+- 模板节点的字段不全 → 回到步骤 1，检查该 Cell 的 C# 字段清单是否完整
+
+#### 7.4 与 React 原型对比验证
+
+**检查项**：
+- ✅ 原型中的关键 UI 元素都存在于 Prefab 中
+- ✅ 特别是：按钮、输入框、列表、模板 Cell
+- ✅ 动态列表有对应的模板节点
+
+**常见问题**：
+- 原型有但 Prefab 没有 → 回到步骤 1/3 补充
+- 按钮、输入框等交互元素缺失 → 可能是内嵌组件字段遗漏
+
+#### 7.5 Unity Console 检查
+
+使用 `mcp__ai-game-developer__console-get-logs` 检查是否有错误或警告：
+
+**检查项**：
+- ❌ 不应该有 `未找到类型: LR.xxx` 错误
+- ❌ 不应该有 `未找到字段: m_xxx` 警告
+- ⚠️ 可以有 `未找到组件配方: xxx` 警告（说明需要扩充白名单）
+
+#### 7.6 截图验证（可选）
+
+对于复杂 UI，使用 `mcp__ai-game-developer__screenshot-isolated` 截图确认视觉效果。
+
+**注意**：Prefab 截图只能看到静态结构，动态内容（如列表项）需要运行时才能看到。
+
+#### 7.7 验证结果报告
+
+向用户报告验证结果：
+
+**成功示例**：
+```
+✅ 验证通过
+- 生成 Prefab: MonthCardGiftPanel.prefab
+- 层级结构: Panel + Screen + Window + Root ✅
+- 字段绑定: 12 个字段全部绑定 ✅
+  - MonthCardGiftPanel: 5 个
+  - MonthCardGiftFriendCell: 4 个
+  - MonthCardGiftCardCell: 3 个
+- 内嵌组件模板: 2 个模板节点存在 ✅
+- Unity Console: 无错误 ✅
+```
+
+**失败示例**：
+```
+❌ 验证失败
+- Screen 节点缺失
+- 字段绑定: 预期 12 个，实际 9 个（缺少 MonthCardGiftCardCell 的 3 个字段）
+- 建议：回到步骤 1，检查是否漏掉 MonthCardGiftCardCell.cs
+```
 
 ### 步骤 8：清理部署的生成器脚本
 

@@ -361,29 +361,29 @@ apply_instruction = Bash("openspec instructions apply --change {change-id}")
    `output_code_csharp.bat` 是全量工具（`outputcode.exe -i {SOURCETABLEDIR}` 扫描 `design/table/default_ios` 整个目录），`copy_csharp_code.exe` 会把生成结果整体覆盖到 `Assets/Script/Table/`。虽然实测中未涉及的表通常不会被改动（工具只对 `outcode_config.json` 名单命中的表重新生成），但**必须验证**，不能假设：
 
    ```bash
-   cd D:/se/develop/client/project/Assets/Script/Table
+   cd ../develop/client/project/Assets/Script/Table
    find . -type f -name "*.cs" | xargs md5sum > /tmp/table_before.md5
    ```
 
    **步骤 2.2：生成配置表代码**
    ```bash
-   cd D:\se\develop\client\tools\table
-   双击 output_code_csharp.bat
-   # 或命令行执行
-   cmd /c "D:\se\develop\client\tools\table\output_code_csharp.bat"
+   cd ../develop/client/tools/table
+   # Windows 环境
+   cmd /c output_code_csharp.bat
+   # 或双击 output_code_csharp.bat
    ```
 
    **⚠️ 步骤 2.2.1：生成后立即比对，还原本次改动之外的文件（强制）**
 
    ```bash
-   cd D:/se/develop/client/project/Assets/Script/Table
+   cd ../develop/client/project/Assets/Script/Table
    find . -type f -name "*.cs" | xargs md5sum > /tmp/table_after.md5
    diff /tmp/table_before.md5 /tmp/table_after.md5 | grep "^[<>]" | awk '{print $2}' | sort -u
    ```
 
    - 差异列表里**只应该出现本次新增/涉及的表**（新表是纯新增文件，diff 不会显示为"改动"；如果差异列表里出现了任何与本次任务无关的表名，说明生成工具把其他表也重新生成了/覆盖了）。
    - 如果发现意外改动的文件，**必须手动还原**（用备份或版本控制恢复该文件的原内容），不能留着未预期的变更进入后续编译和提交。
-   - 该目录不受 git 管理（`D:/se/develop/client` 不是独立 git 仓库），无法用 `git diff` 兜底，**md5 快照比对是唯一的防线，不能省略**。
+   - 该目录不受 git 管理（客户端工程 不是独立 git 仓库），无法用 `git diff` 兜底，**md5 快照比对是唯一的防线，不能省略**。
 
    **步骤 2.3：验证生成结果**
    - 检查是否生成 4 个文件：
@@ -484,8 +484,8 @@ find /d/se/develop/client/project/Assets/Script/LogicModule/ActivityModule -maxd
 
 1. **查找 demo 文件**
    ```bash
-   find "D:/se/openspec/changes/{change-id}/demo" -iname "*.tsx" -o -iname "*.prefab"
-   ls -la "D:/se/openspec/changes/{change-id}/demo/unity/"
+   find "changes/{change-id}/demo" -iname "*.tsx" -o -iname "*.prefab"
+   ls -la "changes/{change-id}/demo/unity/"
    ```
 
 2. **对照 demo 定义编写代码**
@@ -516,7 +516,7 @@ find /d/se/develop/client/project/Assets/Script/LogicModule/ActivityModule -maxd
 | `feedback.red-point` | `RedPoint` | 自定义组件 | 红点提示组件 |
 
 **如果 demo 目录不存在或为空**，说明该功能的 UI prefab 已由策划/美术在 Unity Editor 里手工搭建完成，你需要：
-1. 在客户端工程 `D:/se/develop/client/project/Assets/Resources/` 下搜索对应 prefab
+1. 在客户端工程 `../develop/client/project/Assets/Resources/` 下搜索对应 prefab
 2. 用 Unity Editor 打开 prefab，查看已序列化的字段名和组件类型
 3. 或参考同类型功能的已有实现（用 CodeGraph 查询 `BaseActivityPage` 的子类）
 
@@ -610,7 +610,7 @@ python check_task_deps.py changes/{change-id}/tasks.md --check {next_task_id}
 ##### 6.5.2 客户端增量编译检查（每个 [Client] 任务完成后）
 
 ```bash
-cd D:/se/develop/client/project
+cd ../develop/client/project
 dotnet build Assembly-CSharp.csproj > build_output.txt 2>&1
 python {openspec_root}/.claude/skills/lr-openspec-apply/fix_compile_errors.py build_output.txt --filter {新生成的文件名关键词}
 ```
@@ -628,7 +628,7 @@ python fix_compile_errors.py build_output.txt --filter GrowthFund
 ##### 6.5.3 客户端批量编译验证（每 3-5 个 [Client] 任务后，或角色切换前）
 
 ```bash
-cd D:/se/develop/client/project
+cd ../develop/client/project
 dotnet build Assembly-CSharp.csproj > build_output.txt 2>&1
 python {openspec_root}/.claude/skills/lr-openspec-apply/fix_compile_errors.py build_output.txt
 ```
@@ -681,22 +681,70 @@ python {openspec_root}/.claude/skills/lr-openspec-apply/fix_compile_errors.py bu
   - Type 'abort' to stop execution
 ```
 
-##### 6.5.5 服务端编译验证
+##### 6.5.5 服务端编译验证（强制，无环境豁免）
+
+**原则：任何 [Server] 任务完成前，必须通过编译验证，不得以"环境限制"为由跳过。**
+
+**Windows 环境执行服务端编译（已验证可用）：**
 
 ```bash
-cd D:/se/develop/server/SourceModule
-make 2>&1 | tee build_output.txt
+# 1. 定位 MSBuild.exe（根据实际 VS 版本调整）
+# VS 2022 Enterprise: D:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\amd64\MSBuild.exe
+# VS 2022 Professional: C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\amd64\MSBuild.exe
+# VS 2019: C:\Program Files (x86)\Microsoft Visual Studio\2019\{Edition}\MSBuild\Current\Bin\amd64\MSBuild.exe
+
+# 2. 进入服务端项目目录
+cd ../develop/server/project
+
+# 3. 编译 FsGame 项目
+"<VS路径>/MSBuild/Current/Bin/amd64/MSBuild.exe" \
+  server2017.sln \
+  -t:FsGame \
+  -p:Configuration=Debug \
+  -p:Platform=x64 \
+  -v:minimal > build.log 2>&1
+
+# 4. 检查编译结果
+echo "Exit code: $?"
+grep "error" build.log
 ```
 
-**注意**：服务端编译需要 Linux 环境。如果在 Windows 环境执行 lr-openspec-apply，跳过服务端编译验证，但在任务输出中标注：
+**验证通过标准**：
+- 退出码为 0（`echo $?` 输出 0）
+- `grep "error" build.log` 无输出
+- 生成 `Builds/FsGame/Debug/*.obj` 文件
 
-```
-⚠️  Warning: Server tasks require Linux environment for compile verification
-```
+**如果上述方案不可用**：
+- ❌ **不允许**直接标记任务完成
+- ✅ 必须在 tasks.md 对应任务下方添加注释：
+  ```markdown
+  - [x] 3.4.1 [Server] 实现 DoSuitRecharge
+    ⚠️  **待验证**：代码已生成，但未编译验证（环境限制）
+    → 需在有 Visual Studio 的环境补验证，或由其他开发者协助编译
+  ```
+- ✅ 在 `implementation-report.md` 中记录"待验证清单"
 
-**如果在 Linux 环境**：
-- 编译通过 → 继续
-- 编译失败 → 手动分析（C++ 错误类型复杂，暂不支持自动修复脚本）
+**编译失败处理**：
+
+| 错误类型 | 处理方式 |
+|---------|---------|
+| 头文件缺失（`fatal error: xxx.h: No such file`）| 检查 `#include` 路径，补充缺失头文件 |
+| 链接错误（`undefined reference to`）| 检查 Makefile 是否包含对应模块，或函数声明与实现不匹配 |
+| 未声明的标识符（`error C2065: "XXX": 未声明的标识符`）| 检查常量/宏定义是否缺失，或头文件未包含 |
+| 函数参数错误（`error C2660: 函数不接受 N 个参数`）| 检查函数签名，确认参数数量和类型 |
+| 语法错误（常见于 GBK/UTF-8 混编）| 参考本 SKILL 第 6.5.7 节"编码安全修改策略" |
+| 级联错误（100+ errors）| 优先检查第一个错误，通常是编码问题或核心头文件损坏 |
+
+**验证通过标准**：
+```bash
+# 检查退出码
+if [ $? -eq 0 ]; then
+  echo "✅ 编译成功"
+else
+  echo "❌ 编译失败，查看 build.log"
+  grep "error" build.log
+fi
+```
 
 ##### 6.5.6 配置表验证
 
@@ -710,6 +758,159 @@ python validate_config_table.py changes/{change-id}/config/{table_name}.txt
 - 必填字段是否完整
 - 数据类型是否正确
 - 外键引用是否有效
+
+##### 6.5.7 编码安全修改策略（服务端 C++ 代码专项）
+
+**背景**：服务端代码库存在 GBK/UTF-8 混编文件，直接使用 Read/Edit 工具会导致编码损坏。
+
+**识别高风险文件（修改前必查）**：
+
+```bash
+# 检查文件编码
+file <path>
+
+# 验证是否为 GBK
+python -c "open('file', 'rb').read().decode('gbk')" 2>&1 | head -1
+# 成功 → GBK 编码
+# UnicodeDecodeError → 可能是 UTF-8 或二进制
+
+# 快速检测是否含中文字符串常量
+grep -P '[\x80-\xff]{2,}' <file> | head -5
+# 有输出 → 含非 ASCII 字符（可能是中文）
+```
+
+**安全操作规则**：
+
+| 文件类型 | 允许的工具 | 禁止的工具 | 原因 |
+|---------|-----------|----------|------|
+| **纯 ASCII C++ 文件**（无中文注释/字符串）| Read, Edit, Write | - | 无编码风险 |
+| **GBK 编码 C++ 文件**（含中文）| Python bytes 操作 | ❌ Read/Edit/Write | 会按 UTF-8 误解码，破坏中文字节 |
+| **UTF-8 with BOM**（罕见）| Read, Edit, Write | - | 工具默认 UTF-8，安全 |
+
+**GBK 文件的安全修改方法（Python bytes 模板）**：
+
+```python
+# 模板 1：在文件特定位置后插入代码
+with open('file.cpp', 'rb') as f:
+    data = f.read()
+
+# 定义锚点（必须是纯 ASCII，如 #include 行）
+marker = b'#include "BusinessActivity/MonthCardFunc.h"'
+insert_code = b'\n#include "../CommonModule/ILuaExtModule.h"'
+
+# 插入
+data = data.replace(marker, marker + insert_code, 1)  # 只替换第一次出现
+
+with open('file.cpp', 'wb') as f:
+    f.write(data)
+```
+
+```python
+# 模板 2：在文件末尾追加代码
+with open('file.cpp', 'rb') as f:
+    data = f.read()
+
+append_code = b'''
+int MonthCardModule::nx_month_card_active(void* state) {
+    // ...
+}
+'''
+
+with open('file.cpp', 'wb') as f:
+    f.write(data + append_code)
+```
+
+```python
+# 模板 3：替换函数体（锚点必须是纯 ASCII）
+with open('file.cpp', 'rb') as f:
+    data = f.read()
+
+old_func = b'int MonthCardModule::OldFunc() {\n    return 0;\n}'
+new_func = b'int MonthCardModule::OldFunc() {\n    return DoSomething();\n}'
+
+data = data.replace(old_func, new_func)
+
+with open('file.cpp', 'wb') as f:
+    f.write(data)
+```
+
+**⚠️ 关键约束**：
+- **锚点字符串必须是纯 ASCII**（不能用中文注释作锚点）
+- **插入/替换的代码必须是纯 ASCII 或用 GBK 编码的中文**
+  ```python
+  # ❌ 错误：插入 UTF-8 中文到 GBK 文件
+  insert = '// 月卡激活'.encode('utf-8')  # 会乱码
+  
+  # ✅ 正确：使用英文注释
+  insert = b'// Month card activation'
+  
+  # ✅ 正确：如果必须用中文，用 GBK 编码
+  insert = '// 月卡激活'.encode('gbk')
+  ```
+
+**行尾符保持（防止 SVN diff 噪音）**：
+
+```python
+# 检测原文件行尾符
+with open('file.cpp', 'rb') as f:
+    sample = f.read(1024)
+    has_crlf = b'\r\n' in sample
+    has_lf = b'\n' in sample and not has_crlf
+
+# 修改后恢复原行尾符
+with open('file.cpp', 'rb') as f:
+    data = f.read()
+
+if has_crlf and b'\r\n' not in data:
+    # 被工具改成了 LF，恢复 CRLF
+    data = data.replace(b'\n', b'\r\n')
+
+with open('file.cpp', 'wb') as f:
+    f.write(data)
+```
+
+**损坏检测（修改后立即验证）**：
+
+```bash
+# 检查是否出现 UTF-8 替换字符（U+FFFD = EF BF BD）
+python -c "print(open('file.cpp', 'rb').read().count(b'\xef\xbf\xbd'))"
+# 输出 > 0 → 文件已损坏
+
+# 如果损坏，立即回退
+svn revert file.cpp
+```
+
+**紧急恢复流程**：
+
+```bash
+# 1. 立即回退损坏的文件
+svn revert <file>
+
+# 2. 检查是否有其他文件也被损坏
+svn status | grep "^M"
+
+# 3. 如果多个文件损坏，批量回退
+svn revert -R .
+
+# 4. 重新用 Python bytes 方式修改
+```
+
+**编译错误特征识别（编码问题导致的典型错误）**：
+
+| 错误信息 | 根因 | 处理 |
+|---------|------|------|
+| `error C2001: 常量中有换行符` | UTF-8 替换字符 U+FFFD 破坏了字符串常量 | `svn revert` + 重新用 bytes 修改 |
+| `error C1057: 宏扩展中遇到意外的文件结束` | 级联错误（通常跟随 C2001） | 同上 |
+| 报错位置在中文字符串附近 | 编码不匹配 | 改用英文字符串，或确保文件有 UTF-8 BOM |
+| 100+ 级联错误，第一个错误在 include 附近 | 头文件损坏 | 检查该头文件是否被误改编码 |
+
+**预防性检查清单（修改服务端代码前）**：
+
+- [ ] 运行 `file <path>` 确认编码
+- [ ] 如果是 GBK，准备 Python bytes 脚本，不用 Read/Edit
+- [ ] 修改后立即检查 U+FFFD 出现次数
+- [ ] 修改后运行 `svn diff` 确认改动范围符合预期
+- [ ] 编译验证通过后再标记任务完成
 
 #### 6.6 立即勾选 checkbox（验证通过后）
 
@@ -925,6 +1126,55 @@ tasks.md 的状态:
   ...
 
 继续执行？输入 'y' 继续:
+```
+
+---
+
+### 场景 3：编译验证失败（环境不可用）
+
+**假设在 Windows 环境执行 [Server] 任务，无法编译验证**：
+
+```
+[8/29] 执行任务 3.4.1 [Server] 实现 DoSuitRecharge
+  📖 读取 design/server.md 充值章节
+  ✏️  生成 MonthCardFunc.cpp
+  ✅ 代码生成完成
+  ⚠️  编译验证环境不可用（Windows 环境，需 Linux）
+
+**失败处理**:
+  - 输入 'mark-pending' 标记为"待验证"（推荐）
+  - 输入 'skip' 跳过此任务，由其他开发者补验证
+  - 输入 'force-complete' 强制标记完成（不推荐，有风险）
+
+用户输入:
+```
+
+**用户选择 `mark-pending`**（推荐）：
+```
+⚠️  任务 3.4.1 标记为"待验证"
+
+tasks.md 更新为:
+  - [x] 3.4.1 [Server] 实现 DoSuitRecharge
+    ⚠️  **待验证**：代码已生成，但未编译验证（Windows 环境限制）
+    → 需在 Linux 环境补验证
+
+implementation-report.md 记录:
+  ## 待验证清单
+  - [Server] 3.4.1 实现 DoSuitRecharge - 需 Linux 编译验证
+```
+
+**用户选择 `skip`**：
+```
+⏭️  跳过任务 3.4.1（编译验证不可用）
+已跳过队列.append("3.4.1")
+```
+
+**用户选择 `force-complete`**（不推荐）：
+```
+⚠️  警告: 跳过编译验证可能导致运行时错误
+
+已完成队列.append("3.4.1")
+⚠️  风险: 未验证的代码可能在后续联调阶段失败
 ```
 
 ---
