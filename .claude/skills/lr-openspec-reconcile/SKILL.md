@@ -52,43 +52,158 @@ Read(changes/{change-id}/implementation-report.md)
 
 ### 步骤 2：维度 1 - 协议参数一致性
 
-**检查内容**：design.md 的协议定义 vs 实际服务端协议处理函数
+**检查内容**：前后端协议定义与实际代码的四向对齐检查
 
 #### 2.1 提取 design.md 的协议定义
 
-从附录 B 或协议章节提取：
+从附录 A/B 或协议章节提取：
 ```
-CLIENT_CUSTOMMSG_MIX_GROWTH_FUND_GET_REWARD (973)
-参数：activityID(int), tierIndex(int), rewardType(int)
+CLIENT_CUSTOMMSG_QUERY_MONTH_CARD_GIFT_TARGET (678)
+参数：activityID(int), targetRoleId(int64)
+
+SERVER_CUSTOMMSG_MONTH_CARD_GIFT_TARGET_STATUS (2146)
+参数：activityID(int), targetRoleId(int64), cardCount(int), cardList(varlist: cardType, surplusDay)
 ```
 
-#### 2.2 查询实际服务端代码
+#### 2.2 提取前后端 define 文件的协议注释
 
-使用 CodeGraph 查询协议处理函数：
+**读取四个 define 文件**：
 
 ```bash
-codegraph_explore("OnCustomGetReward MixGrowthFundModule args.IntVal protocol handler")
+# 服务端协议定义
+Read("D:/se/develop/server/project/define/ClientCustomDefine.h")
+Read("D:/se/develop/server/project/define/ServerCustomDefine.h")
+
+# 客户端协议定义
+Read("D:/se/develop/client/project/Assets/Script/Define/ClientCustomID.cs")
+Read("D:/se/develop/client/project/Assets/Script/Define/ServerCustomID.cs")
 ```
 
-**项目路径**: `D:/se/develop/server/project`
+**提取协议注释**（使用 Grep 定位协议号，然后读取前面的注释行）：
 
-查询目标：
-- 函数签名：`int OnCustomGetReward(const PERSISTID& player, const PERSISTID& sender, const IVarList& args)`
-- 参数解析语句：`args.IntVal(1)`, `args.IntVal(2)`, `args.IntVal(3)`
+```bash
+# 示例：提取协议 678 的注释
+Grep("CLIENT_CUSTOMMSG_QUERY_MONTH_CARD_GIFT_TARGET.*678", 
+     path: "D:/se/develop/server/project/define/ClientCustomDefine.h",
+     output_mode: "content", -B: 3)
+```
 
-#### 2.3 对比结果
+提取出每个协议的**四份注释**：
+- 服务端 C2S 注释（ClientCustomDefine.h）
+- 服务端 S2C 注释（ServerCustomDefine.h）
+- 客户端 C2S 注释（ClientCustomID.cs）
+- 客户端 S2C 注释（ServerCustomID.cs）
 
-**检查点**：
-- 参数顺序是否一致（`args.IntVal(1)` 对应 activityID）
-- 参数起始索引是否从 1 开始（框架约定，不是 0）
-- 参数类型是否一致（IntVal vs StringVal）
+#### 2.3 查询实际代码的发送/解析逻辑
 
-**输出格式**：
+**C2S 协议（如 678）**：
 
-| 协议 | design.md 定义 | 实际代码 | 状态 |
+客户端发送代码：
+```bash
+codegraph_explore("SendQueryGiftTarget CLIENT_CUSTOMMSG_QUERY_MONTH_CARD_GIFT_TARGET VarList", 
+                  projectPath: "D:/se/develop/client/project")
+```
+查询目标：`VarList < activityId < targetRoleId` 的实际参数顺序和类型
+
+服务端解析代码：
+```bash
+codegraph_explore("OnCustomQueryGiftTarget args.IntVal CLIENT_CUSTOMMSG_QUERY_MONTH_CARD_GIFT_TARGET", 
+                  projectPath: "D:/se/develop/server/project")
+```
+查询目标：`args.IntVal(1)`, `args.Int64Val(2)` 的实际参数顺序和类型
+
+**S2C 协议（如 2146）**：
+
+服务端发送代码：
+```bash
+codegraph_explore("SERVER_CUSTOMMSG_MONTH_CARD_GIFT_TARGET_STATUS Custom CVarList msg", 
+                  projectPath: "D:/se/develop/server/project")
+```
+查询目标：`msg << activityId << targetRoleId << cardCount` 的实际参数顺序
+
+客户端解析代码：
+```bash
+codegraph_explore("SERVER_CUSTOMMSG_MONTH_CARD_GIFT_TARGET_STATUS IntVal VarList", 
+                  projectPath: "D:/se/develop/client/project")
+```
+查询目标：`args.IntVal(1)`, `args.Int64Val(2)` 的实际参数解析顺序
+
+#### 2.4 四向对齐验证
+
+对于每个协议，进行**多层次对比**：
+
+**第一层：前后端 define 注释对比（静态文档一致性）**
+
+| 协议 | 服务端 define 注释 | 客户端 define 注释 | 状态 |
+|-----|------------------|------------------|------|
+| 678 (C2S) | int activityId, int64 targetRoleId | int activityId, int targetRoleId（低32位）, int targetRoleId（高32位）| ❌ 客户端注释错误（说是拆分但实际不是）|
+| 2146 (S2C) | int activityId, int cardCount | int activityId, int64 targetRoleId, int cardCount, varlist cardList | ❌ 服务端注释缺少 targetRoleId 和 cardList |
+
+**第二层：define 注释 vs 实际代码（文档与实现一致性）**
+
+| 协议 | define 注释 | 实际代码 | 状态 |
+|-----|------------|---------|------|
+| 678 客户端发送 | int activityId, int targetRoleId（低32位）, int targetRoleId（高32位）| `VarList < activityId < targetRoleId` (int64) | ❌ 注释与代码不符 |
+| 678 服务端解析 | int activityId, int64 targetRoleId | `args.IntVal(1), args.Int64Val(2)` | ✅ 一致 |
+| 2146 服务端发送 | int activityId, int cardCount | `msg << activityId << targetRoleId << cardCount << [cardType << surplusDay]...` | ❌ 注释缺少参数 |
+| 2146 客户端解析 | int activityId, int64 targetRoleId, int cardCount, varlist cardList | （需查询实际解析代码）| 待验证 |
+
+**第三层：前后端实际代码对接（运行时正确性）**
+
+| 协议 | 客户端发送 | 服务端解析 | 状态 |
+|-----|----------|----------|------|
+| 678 (C2S) | `VarList < activityId(int) < targetRoleId(int64)` | `args.IntVal(1), args.Int64Val(2)` | ✅ 对接正确 |
+| 2146 (S2C) | `msg << activityId << targetRoleId << cardCount << [cards]...` | （需查询客户端解析代码）| 待验证 |
+
+**第四层：design.md vs 实际实现（设计与实现一致性）**
+
+| 协议 | design.md 定义 | 实际实现 | 状态 |
 |-----|--------------|---------|------|
-| 973 领取奖励 | activityID(int, 索引1), tierIndex(int, 索引2), rewardType(int, 索引3) | args.IntVal(1)=activityID, args.IntVal(2)=tierIndex, args.IntVal(3)=rewardType | ✅ 一致 |
-| 470 查询信息 | activityID(int) | ⚠️ 实际代码未找到处理函数 | ❌ 疑似遗漏 |
+| 678 | activityID(int), targetRoleId(int64) | 前后端代码均为 int + int64 | ✅ 一致 |
+| 2146 | activityID, targetRoleId, cardCount, cardList | 服务端发送完整参数 | ✅ 一致（但服务端 define 注释未同步）|
+
+#### 2.5 问题分类与报告
+
+**严重问题（影响运行）**：
+- 前后端实际代码参数不匹配（发送 3 个参数，解析 4 个参数）
+
+**文档问题（不影响运行，但会误导维护）**：
+- define 注释与实际代码不一致
+- 前后端 define 注释互相冲突
+
+**设计文档问题**：
+- design.md 定义与实际实现不一致
+- design.md 缺失协议定义但代码已实现
+
+**输出示例**：
+
+```markdown
+## 协议 678: 查询月卡赠送目标状态
+
+### 运行状态
+✅ 前后端代码对接正确（客户端发送 int64，服务端解析 int64）
+
+### 文档问题
+❌ 客户端 define 注释错误
+- 位置：`Assets/Script/Define/ClientCustomID.cs:1815-1820`
+- 注释说明：`int targetRoleId（低32位）, int targetRoleId（高32位）`
+- 实际代码：`VarList < targetRoleId` (int64)
+- 建议：修改注释为 `int64 targetRoleId`
+
+---
+
+## 协议 2146: 月卡赠送目标状态回包
+
+### 运行状态
+⚠️ 需验证客户端解析代码是否处理完整参数
+
+### 文档问题
+❌ 服务端 define 注释过期
+- 位置：`define/ServerCustomDefine.h:3657-3660`
+- 注释说明：`int activityId, int cardCount`
+- 实际代码：`msg << activityId << targetRoleId << cardCount << [cardType << surplusDay]...`
+- 建议：补充注释 `int64 targetRoleId, varlist cardList (int cardType, int surplusDay)`
+```
 
 ---
 
