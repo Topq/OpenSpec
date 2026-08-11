@@ -567,6 +567,10 @@ artifacts:
       - 实现细节：rules/tasks/config-implementation.md
 
       ### 3. [Server] 组（后端实现）
+
+      **⚠️ 强制前置：先生成 3.0 服务端架构设计章节，再生成具体任务（3.1 起）**
+      按 `rules/tasks/server-implementation.md`「零、服务端架构设计强制要求」执行：读 design.md 附录 B 的模块定义，检查现有 XxxFunc.cpp 是否已承载多条业务线，用 CodeGraph 对照同类模块的文件拆分粒度，决定本次是否需要拆出独立文件。3.0 章节不得留空。
+
       按模块划分子组（如"3.1 存储层"、"3.2 业务逻辑"、"3.3 协议处理"）
 
       **任务模板示例**（使用 implementation 规则的代码参考）：
@@ -591,6 +595,10 @@ artifacts:
       验证任务必须标注 `对应验收：TC-xxx`
 
       ### 4. [Client] 组（前端实现）
+
+      **⚠️ 强制前置：先生成 4.0 前端架构设计章节，再生成具体任务（4.1 起）**
+      按 `rules/tasks/client-implementation.md`「一点五、前端架构设计强制要求」执行：先读客户端知识库 `D:\se\develop\client\project\.claude\skills\common\project_rag\index.md`（运营活动条目 → `business_activity_module.md` / `base_activity_page.md`），用其中的标准架构流程和数据流向图填 4.0 的 5 个小节。4.0 章节不得留空。
+
       按 Panel/Page 划分子组
 
       **UI 相关的 [Client] 任务**（固定三条）：
@@ -709,6 +717,21 @@ apply:
   tracks: tasks.md
   description: 按任务清单实施，实施前再次确认引用有效性
   instruction: |
+    **执行规则文件**（按任务分类标签读取对应文件，包含强制前置检查、外部工程治理文档引用等细节规则）：
+    - schemas/lr-func-dev/rules/apply/client-execution.md — [Client] 任务
+    - schemas/lr-func-dev/rules/apply/server-execution.md — [Server]、[Contract] 任务（协议号/Record/枚举均走服务端生成器链路）
+    - schemas/lr-func-dev/rules/apply/config-execution.md — [Config] 任务
+
+    执行对应分类任务前，必须先完整阅读该文件，不能只看本 instruction 的概要描述。
+
+    **硬性约束速览**（详细规则见上方对应文件，此处仅提醒不可省略的检查点）：
+    - 修改服务端 struct/record/枚举/协议前必须先读 develop/server/project/AGENTS.md，判断是否走 XML→生成器链路，禁止直接手改 define/ 下的生成产物。
+    - 修改服务端 .cpp/.h 前必须先判断编码（file 命令），GBK 文件禁用 Edit 工具，改用 Python bytes 操作。
+    - 客户端任务开始前必须先读 develop/client/project/AGENTS.md 和 project_rag/index.md。
+    - 配置表代码生成前后必须做 md5 快照比对，防止全量工具误改其他表。
+
+    ---
+
     **apply 范围说明**：
     - apply 负责生成代码文件（.cs/.cpp/.h/.proto/.xlsx）
     - apply 不负责生成 Unity Prefab（那是 apply 完成后由独立 skill `lr-unity-prefab-gen` 处理）
@@ -740,27 +763,30 @@ apply:
 
     ### [Contract] 协议定义
 
+    **⚠️ 协议号分配和字段布局必须通过服务端 XML→生成器链路完成，禁止直接手写或直接生成 `define/` 产物**。详见 `rules/apply/server-execution.md` 第 0-1 节。
+
     **输入**：
     - design.md 附录 A（客户端协议定义）和附录 B（服务端协议定义）
-    - 现有协议文件（获取已分配的最大协议号）
+    - `D:\se\develop\server\project\AGENTS.md` 及其路由的 `$lr-generated-code-workflow`
 
     **执行逻辑**：
-    1. **协议号分配**（自动分配机制）
-       - 读取现有协议文件，找到当前最大协议号（如 `C2S_XXX = 1234`）
-       - 为 design.md 中所有 `{待分配}` 占位符按顺序分配新协议号（最大号+1, +2, ...）
-       - 生成协议定义文件（.proto 或项目约定格式）
+    1. **协议号分配**（必须走生成器链路，不是自动/手动分配数字）
+       - 读取 `develop/server/project/AGENTS.md`，确认走 `$lr-generated-code-workflow`
+       - 为 design.md 中所有 `{待分配}` 占位符，在 `cons/msg/config/*.xml` 对应消息定义里追加新条目（禁止插入导致已有 ID 位移的位置，只能在区间末尾追加）
+       - 从 `cons/msg` 目录运行匹配的生成器（`gen_xxx_msg.bat` 或 `gen_msg.exe`），生成 `Config.json` 指定的 `define_file_name`
+       - **禁止**直接编辑 `define/ServerCustomDefine.h`/`define/ClientCustomDefine.h` 等生成产物
 
     2. **消息结构定义**
-       - 按 design.md 的参数列表定义消息体
+       - 按 design.md 的参数列表在 XML 源里定义消息体字段，新增字段追加在末尾，不改动已有字段顺序和类型
        - 客户端和服务端的消息定义必须完全一致（已在 design 阶段对齐检查过）
 
     **输出**：
-    - 协议定义文件（如 `define/growth_fund_proto.h` 或 `.proto` 文件）
-    - 更新协议号枚举文件
+    - 修改过的 `cons/msg/config/*.xml` 源文件
+    - 生成器产生的 `define_file_name` 对应产物（机械生成，不手改）
 
     **验证**：
-    - 协议号无冲突
-    - 消息结构符合命名约定
+    - 协议号无冲突、未导致已有 ID 位移
+    - 生成前后 diff 只包含目标机械变化（见 `rules/apply/server-execution.md` 第 1 节验证清单）
 
     ---
 
@@ -793,19 +819,23 @@ apply:
 
     ### [Server] 服务端实现
 
+    **⚠️ 前置检查（阻断性）**：开始前先执行 `rules/apply/server-execution.md` 第 0 节（读 `develop/server/project/AGENTS.md`）。如果任务涉及 Record 表定义，属于第 1 节"生成代码合规检查"的触发范围，必须走 XML→生成器链路，不能直接手写表名宏/列枚举。
+
     **输入**：
     - design.md 附录 B（服务端详细设计）
     - rules/tasks/server-implementation.md（代码模板）
+    - rules/apply/server-execution.md（执行规则，含生成代码合规检查、GBK 编码安全）
 
     **执行逻辑**：
-    1. **Record 表定义**
-       - 生成表名宏：`#define XXX_REC "xxx_rec"`
-       - 生成列枚举：`enum EXxxRecCol { COL_ACTIVITY_ID = 0, ... }`
-       - 按 design.md 的持久化属性设置列属性
+    1. **Record 表定义**（必须走生成器链路，不是直接写 .h 宏/枚举）
+       - 按 `rules/apply/server-execution.md` 第 1 节，在 `cons/res/struct/**/*.xml` 里定义/追加 record 和列（新列只能追加在末尾，不能重排已有列）
+       - 运行 `struct_generator.py` 生成 `define/struct/**/struct_<name>.h`
+       - 按 design.md 的持久化属性在 XML 里设置列属性，不在生成产物里手改
 
     2. **模块骨架生成**
        - 生成模块类文件（如 `FsGame/ActivityModule/GrowthFundModule.cpp`）
        - 实现初始化函数（OnInit、注册协议回调）
+       - 涉及中文注释/字符串的文件，按 `rules/apply/server-execution.md` 第 2 节的编码安全规则操作
 
     3. **协议处理流程**
        - 为每个协议生成处理函数（如 `OnReqGrowthFundPurchase`）
@@ -814,11 +844,12 @@ apply:
 
     **输出**：
     - 服务端模块文件（.cpp/.h）
-    - Record 表定义文件
+    - 修改过的 struct XML 源文件 + 生成器产生的 Record 定义文件
 
     **验证**：
     - Record 表列定义与客户端对齐
     - 协议处理函数的参数与协议定义一致
+    - 确认没有直接手改任何标记 "Generated from ... Do not edit." 的产物
 
     ---
 

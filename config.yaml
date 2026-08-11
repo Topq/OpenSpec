@@ -33,3 +33,6 @@ rules:
   tasks:
     - 任务必须使用 [Contract]、[Config]、[Server]、[Client]、[Integration] 分类。
     - 业务逻辑任务必须标注"对应验收：TC-xxx"。
+  # 注意：openspec instructions apply 使用独立渲染逻辑（generateApplyInstructions），
+  # 不读取本文件的 rules 字段。apply 阶段的硬约束写在
+  # schemas/lr-func-dev/schema.yaml 的 apply.instruction 里，此处不要加 apply: 键（不会生效）。

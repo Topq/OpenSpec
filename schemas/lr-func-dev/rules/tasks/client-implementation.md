@@ -172,6 +172,86 @@
 
 ---
 
+## 一点五、前端架构设计强制要求（阻断性）
+
+**生成客户端具体任务（4.1 及以后）前，必须先在 tasks.md 的"4.0 前端架构设计"章节填写完整的架构设计，不得留空或跳过。**
+
+### 1.5.1 为什么需要
+
+没有架构约束时，AI 直接从 design/client.md 的功能点跳到"创建 XxxModule.cs"这类具体任务，容易把 Record 监听、协议收发、UI 刷新全部堆进一个类，导致：
+- 职责边界不清晰，后续维护成本高
+- 评审者看不出设计意图，只能从代码反推
+- 数据缓存位置随意，容易出现 Module 和 Page 各存一份、状态不一致
+
+### 1.5.2 架构设计的知识来源（强制：知识库优先，不新写文档）
+
+**本项目不维护独立的客户端架构知识库**，架构设计的依据来自客户端工程自己的知识库索引：
+
+```
+D:\se\develop\client\project\.claude\skills\common\project_rag\index.md
+```
+
+**生成 4.0 章节前的强制步骤**：
+1. 读取 `index.md`，定位第 11 条"运营活动"（若功能属于其他类型，按 index.md 里的其他条目定位）
+2. 读取 `reference/module/activity.md` 找到对应子活动条目
+3. 读取 `reference/module/activity/business_activity_module.md`（框架层：红点/可见性/跳转/参数系统，第十一节"新增活动的标准流程"）
+4. 读取 `reference/ui/base_activity_page.md`（UI 三层结构：Panel/Page/MenuCell，第二节有完整数据流向图，第九节"新增活动UI的标准流程"）
+5. 用这两份文档里的标准流程和数据流向图，填 4.0 的 5 个小节
+
+**如果 index.md 没有覆盖到的功能类型**（不是标准活动模式，如需要独立物理模拟的玩法）：
+- 允许用 CodeGraph 查询代码现场分析架构（如 `codegraph explore "MarblePlinkoModule MarblePlinkoPage OnUpdateTime"`）
+- 在 4.0.4 决策表里注明"知识库未覆盖，参考 XXX 模块现场分析"
+
+### 1.5.3 架构设计章节结构（对应模板 tasks.md 的 4.0）
+
+```markdown
+### 4.0 前端架构设计
+
+#### 4.0.1 模块分层与职责
+- Module（数据层）：职责 + 不做什么
+- Page（视图控制器）：职责 + 不做什么
+- Cell（可复用组件）：职责 + 不做什么
+
+#### 4.0.2 数据流设计
+Server Record 更新 → Module 缓存/通知 → Page 订阅 → Cell 刷新 的完整链路
+
+#### 4.0.3 状态管理策略
+- 单一数据源在哪一层
+- 缓存位置（Module 的 Dictionary，还是不缓存实时读）
+- 刷新机制（事件驱动 CommandDelayArgsDynamic，还是轮询 OnUpdateTime）
+
+#### 4.0.4 关键设计决策表
+| 决策点 | 方案 | 理由 |
+|-------|------|------|
+| Record 监听位置 | Module / Page | 说明理由 |
+| 数据缓存位置 | Module / Page / 不缓存 | 说明理由 |
+| 协议发送位置 | Cell 调 Module / Page 直接发 | 说明理由 |
+| 红点计算时机 | Record 回调 / Page 打开时 | 说明理由 |
+
+#### 4.0.5 文件组织
+XxxModule/ 和 XxxPage/ 目录下的文件清单及各自职责
+```
+
+### 1.5.4 推荐的标准三层架构（默认模式，除非知识库指出例外）
+
+**参考实现**：`MixGrowthFundModule` + `MixGrowthFundPage`（客户端工程内真实代码，可直接 CodeGraph 查询）
+
+- **Module 层**：持有数据缓存（`Dictionary<int, XxxStatus>`），在 Record 监听回调里刷新缓存并主动发事件通知（`m_Kernel.CommandDelayArgsDynamic`），提供只读查询方法给 Page 调用，不持有 UI 引用
+- **Page 层**：`OnCreateUI` 获取 Module 引用，`InitCommand` 订阅 Module 发出的刷新事件，事件触发时调用 Module 的查询方法刷新 UI，不直接读 Record
+- **Cell 层**：只做数据绑定和状态映射，不直接调协议，通过回调转发给 Page/Module 处理
+
+**例外场景**（不适用三层缓存模式，参考知识库或 CodeGraph 现场分析）：
+- 需要每帧/每秒轮询的实时玩法（如物理模拟类），参考 `MarblePlinkoModule` 模式
+- 纯展示无后端数据的界面，不需要 Module 层
+
+**CodeGraph 查询模板**：
+```bash
+codegraph explore "MixGrowthFundModule IConfigSyncMethod OnRecordChanged GetRewardStatus"
+codegraph explore "MixGrowthFundPage InitCommand OnMixGrowthFundRefresh RefreshView"
+```
+
+---
+
 ## 一、任务拆分粒度规则
 
 ### 1.1 粒度标准（阻断性）

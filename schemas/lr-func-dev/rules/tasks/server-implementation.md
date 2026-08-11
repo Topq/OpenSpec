@@ -6,6 +6,75 @@
 
 ---
 
+## 零、服务端架构设计强制要求（阻断性）
+
+**生成服务端具体任务（3.1 及以后）前，必须先在 tasks.md 的"3.0 服务端架构设计"章节填写完整的架构设计，不得留空或跳过。**
+
+### 0.1 为什么需要
+
+服务端业务模块没有强制的分层框架约束（不像客户端有 Module/Page/Cell 三层），AI 容易把新功能全部塞进已有的 `XxxFunc.cpp`，导致单文件承载多条互不相关的业务线（如月卡功能把日常领取、组合套餐、赠送三条线全堆进同一个 1000+ 行文件）。架构设计章节强制在写代码前先决定文件边界。
+
+### 0.2 架构设计的知识来源
+
+**服务端没有独立的架构知识库**，本节内容由以下两处产出：
+1. **design.md 附录 B**（服务端详细设计）——模块定义、Record 表定义、依赖模块清单已经在 design 阶段产出，3.0 章节是对这些信息的结构化提炼，不是重新设计
+2. **CodeGraph 查询同类模块**——对照项目里文件拆分粒度相近的模块（如 `MixGrowthFundModule` 对应 `MixGrowthFundFunc.cpp`/`MixGrowthFundEventCallBack.cpp`），判断本次是否需要拆出独立文件
+
+**执行步骤**：
+1. 读取 `design.md` 附录 B 的"模块定义"章节，确认是新建模块还是修改既有模块
+2. 若是修改既有模块：检查现有 `XxxFunc.cpp` 当前行数和已承载的业务线数量
+   ```bash
+   wc -l FsGame/ActivityModule/BusinessActivity/XxxFunc.cpp
+   grep -c "^int XxxModule::\|^void XxxModule::\|^bool XxxModule::" FsGame/ActivityModule/BusinessActivity/XxxFunc.cpp
+   ```
+3. 用 CodeGraph 查询 1-2 个同类模块的文件拆分方式作参考：
+   ```bash
+   codegraph explore "MixGrowthFundModule MixGrowthFundFunc MixGrowthFundEventCallBack Init"
+   ```
+4. 判断标准：**新增的业务线是否与既有业务线共享数据结构/校验逻辑**
+   - 共享（如都读同一个 Record 表、走同一个充值分派）→ 可以留在同一文件，但要在 3.0.3 里明确函数边界
+   - 不共享（如本次月卡新增"组合套餐"“赠送”与既有"日常领取"除了活动开关外几乎不共享代码）→ 应拆成独立文件，如 `MonthCardSuitFunc.cpp`/`MonthCardGiftFunc.cpp`，参照 `GrowthFund/` 目录下 `GrowthFundFunc.cpp` 与 `MixGrowthFundFunc.cpp` 并存的做法（同一活动类型下按版本/子玩法拆文件）
+
+### 0.3 架构设计章节结构（对应模板 tasks.md 的 3.0）
+
+```markdown
+### 3.0 服务端架构设计
+
+#### 3.0.1 模块与文件组织
+列出本次涉及的模块名、现有文件是否复用/需要拆分新文件，参考同类模块的文件拆分粒度
+
+#### 3.0.2 Hook 注册清单
+列出本次需要注册的 Hook 类型及各自用途：
+| Hook 类型 | 用途 | 触发时机 |
+|----------|------|---------|
+| AddCustomHook | 处理客户端协议 | 收到指定协议号 |
+| AddNotifyHook(BizActivNtf_OnStart/OnRemove) | 活动生命周期 | 活动开启/关闭 |
+| AddRefreshHook(REFRESH_TIME_ID_DAILY_FIVE) | 每日定时刷新 | 每日 05:00 |
+| RegisterDisposeFunc | 充值发货回调 | 充值到账 |
+| RegistOnlineToDealOfflineFunc | 跨服/离线消息处理 | 收到 M2O 消息 |
+
+#### 3.0.3 业务线拆分决策
+如果一个模块要承载多条业务线，说明每条业务线对应哪些函数、放在哪个文件，是否需要拆出独立 .cpp。给出理由（共享数据结构 vs 独立校验逻辑）
+```
+
+### 0.4 常见的 Hook 注册体系（供 3.0.2 参考，完整定义以代码为准）
+
+| Hook | 所属模块 | 典型用途 |
+|------|---------|---------|
+| `g_pBizActivModule->AddCustomHook<ActivityType, ProtocolID, KERNELTYPE_LOCAL>` | BizActivModule | 客户端协议入口（领取、查询等） |
+| `g_pBizActivModule->AddNotifyHook(ActivityType, BizActivNtf_OnStart/OnRemove, ...)` | BizActivModule | 活动开启/关闭时初始化或清理玩家数据 |
+| `g_pBizActivModule->AddRefreshHook<ActivityType, REFRESH_TIME_ID_XXX>` | BizActivModule | 每日/每周定时刷新 |
+| `g_pRechargeModule->RegisterDisposeFunc(RECHARGE_TYPE_XXX, OnXxxDispose)` | RechargeModule | 充值到账后发货，一个活动可能有多个充值类型分派到不同处理函数 |
+| `g_pPlayerDataModule->RegistOnlineToDealOfflineFunc(M2O_MSG_XXX, ...)` | PlayerDataModule | 跨服/离线消息（如赠送查询接收方状态） |
+
+**CodeGraph 查询模板**：
+```bash
+codegraph explore "MonthCardModule Init AddCustomHook AddNotifyHook RegisterDisposeFunc"
+codegraph explore "MixGrowthFundModule Init RegisterDisposeFunc OnBizActivStart"
+```
+
+---
+
 ## 一、任务拆分粒度规则
 
 ### 1.1 粒度标准（阻断性）

@@ -79,6 +79,16 @@ namespace LRUIPrefabGen
             int boundFieldCount = 0;
             CollectAndBindScoped(root, rootGo, rootComponent, ref boundFieldCount);
 
+            // 结构约定注入（Phase 0.5）：在保存 Prefab 前，对内存中的 GameObject 树进行
+            // 约定性结构补全，不依赖 TSX 中的显式声明。
+            string rootComponentId = (string)root["component"];
+            // surface.page 根节点（内嵌页面，无 Canvas）：自动注入 Root 满铺容器，包裹所有子节点。
+            // 参考：MixGrowthFundPage.prefab 中 MixGrowthFundPage/Root/...
+            if (rootComponentId == "surface.page")
+            {
+                InjectRootWrapper(rootGo);
+            }
+
             string fullPrefabPath = prefabPath.EndsWith(".prefab") ? prefabPath : prefabPath + ".prefab";
             string dir = Path.GetDirectoryName(fullPrefabPath);
             if (!string.IsNullOrEmpty(dir) && !AssetDatabase.IsValidFolder(dir))
@@ -100,7 +110,7 @@ namespace LRUIPrefabGen
             // 再用 PrefabUtility.SavePrefabAsset（不是 SaveAsPrefabAsset）落盘。
             // 这是 Unity 官方推荐的"修改已存在 Prefab 资产序列化字段"的方式，
             // 之前用 EditPrefabContentsScope 重新进入编辑模式的方案有状态没对齐，改用这个更直接的路径。
-            PostProcessSavedPrefabAsset(root, fullPrefabPath);
+            PostProcessSavedPrefabAsset(root, fullPrefabPath, jsonPath);
 
             Debug.Log($"[LRUnityLayoutPrefabGenerator] 生成完成: {fullPrefabPath}，字段绑定 {boundFieldCount} 个");
             return fullPrefabPath;
@@ -146,6 +156,17 @@ namespace LRUIPrefabGen
             if (!string.IsNullOrEmpty(component))
             {
                 ComponentRecipes.Apply(go, component, node);
+            }
+
+            // Canvas 组件添加时会重置 RectTransform 属性，根节点需要在此之后再次强制设置
+            if (parent == null)
+            {
+                var rect = go.GetComponent<RectTransform>();
+                rect.anchorMin = Vector2.zero;
+                rect.anchorMax = Vector2.one;
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.localScale = Vector3.one;
+                Debug.Log($"[BuildNode] 根节点 RectTransform 在添加组件后重新设置: {go.name}");
             }
 
             // 处理 data-lr-component: 显式指定额外挂载的 LR 自定义组件（如 Cell 脚本）
@@ -227,22 +248,40 @@ namespace LRUIPrefabGen
 
         static void ApplyRectTransform(RectTransform rect, JObject node)
         {
-            var anchorMin = ReadVector2(node["anchorMin"]);
-            var anchorMax = ReadVector2(node["anchorMax"]);
-            var anchors = ReadVector4(node["anchors"]);
-            if (anchors.HasValue)
+            // Prefab 根节点默认值：满铺锚点 + 居中 pivot + 正常缩放
+            // 参考所有现有 Panel Prefab（SeasonMainPanel0、AdventureBlendEntryPanel 等）
+            bool isRoot = rect.parent == null;
+            if (isRoot)
             {
-                rect.anchorMin = new Vector2(anchors.Value.x, anchors.Value.y);
-                rect.anchorMax = new Vector2(anchors.Value.z, anchors.Value.w);
-            }
-            else
-            {
-                if (anchorMin.HasValue) rect.anchorMin = anchorMin.Value;
-                if (anchorMax.HasValue) rect.anchorMax = anchorMax.Value;
+                // 根节点强制满铺锚点（忽略 JSON 中的 anchors 字段）
+                rect.anchorMin = Vector2.zero;
+                rect.anchorMax = Vector2.one;
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.localScale = Vector3.one;
+                Debug.Log($"[ApplyRectTransform] 根节点默认值已设置: {rect.name}, anchorMax={rect.anchorMax}, pivot={rect.pivot}, localScale={rect.localScale}");
             }
 
+            // 非根节点才应用 JSON 中的 anchors/anchorMin/anchorMax
+            if (!isRoot)
+            {
+                var anchorMin = ReadVector2(node["anchorMin"]);
+                var anchorMax = ReadVector2(node["anchorMax"]);
+                var anchors = ReadVector4(node["anchors"]);
+                if (anchors.HasValue)
+                {
+                    rect.anchorMin = new Vector2(anchors.Value.x, anchors.Value.y);
+                    rect.anchorMax = new Vector2(anchors.Value.z, anchors.Value.w);
+                }
+                else
+                {
+                    if (anchorMin.HasValue) rect.anchorMin = anchorMin.Value;
+                    if (anchorMax.HasValue) rect.anchorMax = anchorMax.Value;
+                }
+            }
+
+            // pivot 允许 JSON 覆盖（根节点和非根节点都一样）
             var pivot = ReadVector2(node["pivot"]);
-            if (pivot.HasValue)
+            if (pivot.HasValue && !isRoot)  // 根节点 pivot 已在上面设置，不覆盖
             {
                 rect.pivot = pivot.Value;
             }
@@ -404,7 +443,7 @@ namespace LRUIPrefabGen
         // serialized fields and is what actually persists to disk.
         // ------------------------------------------------------------------
 
-        static void PostProcessSavedPrefabAsset(JObject jsonRoot, string prefabPath)
+        static void PostProcessSavedPrefabAsset(JObject jsonRoot, string prefabPath, string jsonPath)
         {
             GameObject prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
             if (prefabAsset == null)
@@ -413,10 +452,34 @@ namespace LRUIPrefabGen
                 return;
             }
 
+            // Phase 2.1: 修复根节点 RectTransform（SaveAsPrefabAsset 时 Unity 会重置 Canvas 根节点的 RectTransform）
+            var rootRect = prefabAsset.GetComponent<RectTransform>();
+            if (rootRect != null)
+            {
+                rootRect.anchorMin = Vector2.zero;
+                rootRect.anchorMax = Vector2.one;
+                rootRect.pivot = new Vector2(0.5f, 0.5f);
+                rootRect.anchoredPosition = Vector2.zero;
+                rootRect.sizeDelta = Vector2.zero;  // 满铺锚点下 sizeDelta 必须是 (0,0)
+                rootRect.localScale = Vector3.one;
+                Debug.Log($"[PostProcessSavedPrefabAsset] 根节点 RectTransform 已修复: {prefabAsset.name}");
+            }
+
             int localizerCount = 0;
             int scrollViewCount = 0;
             var localizerEntries = new System.Collections.Generic.List<(string key, string defaultText, string path)>();
             PostProcessNode(jsonRoot, prefabAsset, ref localizerCount, ref scrollViewCount, localizerEntries);
+
+            // 结构约定注入（Phase 2.5）：对已保存的 Prefab 资产补全 Screen/PowerSaveMode 组件。
+            // surface.panel 根节点（独立弹窗/全屏面板，有 Canvas）：
+            //   - 名为 "Screen" 的直接子节点 → 添加 Image（半透明黑色遮罩）+ CanvasGroup
+            //   - 名为 "PowerSaveMode" 的直接子节点 → 添加 LR.SwitchMainCamera + PowerSaveMode
+            string rootComp = (string)jsonRoot["component"];
+            if (rootComp == "surface.panel")
+            {
+                PatchScreenNode(prefabAsset);
+                PatchPowerSaveModeNode(prefabAsset);
+            }
 
             EditorUtility.SetDirty(prefabAsset);
             PrefabUtility.SavePrefabAsset(prefabAsset);
@@ -427,7 +490,7 @@ namespace LRUIPrefabGen
             // 写入 Language_Keys.md
             if (localizerEntries.Count > 0)
             {
-                WriteLanguageKeysMarkdown(prefabPath, localizerEntries);
+                WriteLanguageKeysMarkdown(jsonPath, localizerEntries);
             }
         }
 
@@ -751,35 +814,113 @@ namespace LRUIPrefabGen
         }
 
         /// <summary>
+        /// surface.page 根节点的 Root 满铺容器注入。
+        /// 在内存中的 rootGo 下创建名为 "Root" 的满铺子节点，把所有原有直接子节点移入其中。
+        /// </summary>
+        static void InjectRootWrapper(GameObject rootGo)
+        {
+            if (rootGo.transform.childCount == 0) return;
+
+            // 收集现有所有直接子节点
+            var children = new System.Collections.Generic.List<Transform>();
+            for (int i = 0; i < rootGo.transform.childCount; i++)
+                children.Add(rootGo.transform.GetChild(i));
+
+            // 创建 Root 满铺容器
+            var rootNode = new GameObject("Root", typeof(RectTransform));
+            rootNode.transform.SetParent(rootGo.transform, false);
+            var rt = rootNode.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.anchoredPosition = Vector2.zero;
+            rt.sizeDelta = Vector2.zero;
+            rt.pivot = new Vector2(0.5f, 0.5f);
+
+            // 把所有原有子节点移入 Root
+            foreach (var child in children)
+                child.SetParent(rootNode.transform, false);
+
+            Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectRootWrapper: {rootGo.name} → Root 注入完成，{children.Count} 个子节点移入");
+        }
+
+        /// <summary>
+        /// surface.panel 根节点的 Screen 遮罩节点组件补全。
+        /// 为名为 "Screen" 的直接子节点添加 Image（#00000080）+ CanvasGroup，使其成为有效的半透明遮罩。
+        /// 参考：AdventureBlendEntryPanel.prefab/Screen
+        /// </summary>
+        static void PatchScreenNode(GameObject rootGo)
+        {
+            var screenTransform = rootGo.transform.Find("Screen");
+            if (screenTransform == null) return;
+            var screenGo = screenTransform.gameObject;
+
+            // Image（遮罩底色）
+            var image = screenGo.GetComponent<Image>();
+            if (image == null)
+            {
+                image = screenGo.AddComponent<Image>();
+                image.color = new Color(0f, 0f, 0f, 0.6f);
+                image.raycastTarget = true;
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] PatchScreenNode: {screenGo.name} 添加 Image（#0000009A）");
+            }
+
+            // CanvasGroup（控制整体透明度和交互屏蔽）
+            if (screenGo.GetComponent<CanvasGroup>() == null)
+            {
+                screenGo.AddComponent<CanvasGroup>();
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] PatchScreenNode: {screenGo.name} 添加 CanvasGroup");
+            }
+        }
+
+        /// <summary>
+        /// surface.panel 根节点的 PowerSaveMode 节点组件补全。
+        /// 为名为 "PowerSaveMode" 的直接子节点添加 LR.SwitchMainCamera + PowerSaveMode。
+        /// 参考：SeasonMainPanel0.prefab/PowerSaveMode
+        /// </summary>
+        static void PatchPowerSaveModeNode(GameObject rootGo)
+        {
+            var pmTransform = rootGo.transform.Find("PowerSaveMode");
+            if (pmTransform == null) return;
+            var pmGo = pmTransform.gameObject;
+
+            Type switchCamType = FindType("LR.SwitchMainCamera");
+            if (switchCamType != null && pmGo.GetComponent(switchCamType) == null)
+            {
+                pmGo.AddComponent(switchCamType);
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] PatchPowerSaveModeNode: {pmGo.name} 添加 LR.SwitchMainCamera");
+            }
+
+            Type powerSaveType = FindType("PowerSaveMode");
+            if (powerSaveType != null && pmGo.GetComponent(powerSaveType) == null)
+            {
+                pmGo.AddComponent(powerSaveType);
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] PatchPowerSaveModeNode: {pmGo.name} 添加 PowerSaveMode");
+            }
+        }
+
+        /// <summary>
         /// 写入 Language_Keys.md 到 changes/{change-id}/ 目录。
         /// change-id 从 prefabPath 提取：Assets/Editor/{Name}_Demo.prefab 中提取小写 kebab-case。
         /// 如果是非 Demo prefab（正式生成路径在 Assets/Resources/PanelUI），则不生成 md。
         /// </summary>
-        static void WriteLanguageKeysMarkdown(string prefabPath, System.Collections.Generic.List<(string key, string defaultText, string path)> entries)
+        static void WriteLanguageKeysMarkdown(string jsonPath, System.Collections.Generic.List<(string key, string defaultText, string path)> entries)
         {
-            // 只为 Demo prefab 生成（路径包含 Assets/Editor 且文件名包含 _Demo）
-            if (!prefabPath.Contains("Assets/Editor") || !prefabPath.Contains("_Demo"))
+            // jsonPath 形如：D:/se/openspec/changes/month-card-activity/demo/unity/XXX.json
+            // 直接从路径中提取 changes/ 所在的目录和 change-id，不依赖 prefabPath 或 Application.dataPath
+            string normalized = jsonPath.Replace("\\", "/");
+            int changesIdx = normalized.IndexOf("/changes/");
+            if (changesIdx < 0)
             {
+                Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] jsonPath 中未找到 /changes/ 目录，跳过 Language_Keys.md 生成: {jsonPath}");
                 return;
             }
 
-            // 从 prefabPath 提取 change-id：Assets/Editor/GrowthFundPage_Demo.prefab -> growth-fund
-            string fileName = Path.GetFileNameWithoutExtension(prefabPath); // GrowthFundPage_Demo
-            if (fileName.EndsWith("_Demo"))
-            {
-                fileName = fileName.Substring(0, fileName.Length - 5); // GrowthFundPage
-            }
-            if (fileName.EndsWith("Page"))
-            {
-                fileName = fileName.Substring(0, fileName.Length - 4); // GrowthFund
-            }
+            string openspecRoot = normalized.Substring(0, changesIdx); // D:/se/openspec
+            string afterChanges = normalized.Substring(changesIdx + "/changes/".Length); // month-card-activity/demo/unity/XXX.json
+            int nextSlash = afterChanges.IndexOf('/');
+            string changeId = nextSlash >= 0 ? afterChanges.Substring(0, nextSlash) : afterChanges; // month-card-activity
 
-            // 转小写 kebab-case：GrowthFund -> growth-fund
-            string changeId = System.Text.RegularExpressions.Regex.Replace(fileName, "([a-z])([A-Z])", "$1-$2").ToLower();
-
-            // 构造 changes/{change-id}/Language_Keys.md 路径
-            string projectRoot = Path.GetDirectoryName(Path.GetDirectoryName(Application.dataPath)); // 从 Assets 向上两级到 D:/se/openspec
-            string changesDir = Path.Combine(projectRoot, "changes", changeId);
+            string changesDir = Path.Combine(openspecRoot, "changes", changeId);
             if (!Directory.Exists(changesDir))
             {
                 Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] changes/{changeId} 目录不存在，跳过 Language_Keys.md 生成");
@@ -787,24 +928,43 @@ namespace LRUIPrefabGen
             }
 
             string mdPath = Path.Combine(changesDir, "Language_Keys.md");
-            var lines = new System.Collections.Generic.List<string>
-            {
-                "# Language Keys",
-                "",
-                "| Key | Default Text | Path |",
-                "|-----|--------------|------|"
-            };
 
-            foreach (var (key, text, path) in entries)
+            // 读取已有内容，合并去重后回写（避免覆盖 lr-openspec-apply 写入的其他 key）
+            var existingKeys = new System.Collections.Generic.HashSet<string>();
+            var existingLines = new System.Collections.Generic.List<string>();
+            if (File.Exists(mdPath))
             {
-                // Markdown 表格转义：| 和换行符
-                string escapedText = text.Replace("|", "\\|").Replace("\n", " ").Replace("\r", "");
-                string escapedPath = path.Replace("|", "\\|");
-                lines.Add($"| {key} | {escapedText} | {escapedPath} |");
+                foreach (var line in File.ReadAllLines(mdPath, System.Text.Encoding.UTF8))
+                {
+                    existingLines.Add(line);
+                    // 提取已有 key（表格行格式：| key | ... |）
+                    if (line.StartsWith("| ") && !line.StartsWith("| Key ") && !line.StartsWith("|---"))
+                    {
+                        var parts = line.Split('|');
+                        if (parts.Length >= 2)
+                        {
+                            existingKeys.Add(parts[1].Trim());
+                        }
+                    }
+                }
+            }
+            else
+            {
+                existingLines.Add("| Key | Default Text |");
+                existingLines.Add("|-----|--------------|");
             }
 
-            File.WriteAllLines(mdPath, lines, System.Text.Encoding.UTF8);
-            Debug.Log($"[LRUnityLayoutPrefabGenerator] 写入 Language_Keys.md: {mdPath}（{entries.Count} 条）");
+            int newCount = 0;
+            foreach (var (key, text, goPath) in entries)
+            {
+                if (existingKeys.Contains(key)) continue;
+                string escapedText = text.Replace("|", "\\|").Replace("\n", " ").Replace("\r", "");
+                existingLines.Add($"| {key} | {escapedText} |");
+                newCount++;
+            }
+
+            File.WriteAllLines(mdPath, existingLines, System.Text.Encoding.UTF8);
+            Debug.Log($"[LRUnityLayoutPrefabGenerator] 写入 Language_Keys.md: {mdPath}（新增 {newCount} 条，已有 {existingKeys.Count} 条）");
         }
     }
 }
