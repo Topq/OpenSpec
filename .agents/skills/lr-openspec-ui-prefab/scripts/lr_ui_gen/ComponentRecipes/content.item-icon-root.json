@@ -1,0 +1,14 @@
+{
+  "semanticId": "content.item-icon-root",
+  "componentType": "UnityEngine.GameObject",
+  "description": "运行时 ItemIconBase.Allocate() 的挂载点。用于动态生成完整物品图标（图片+数量+点击事件）。",
+  "components": [],
+  "hierarchy": [],
+  "notes": [
+    "空 GameObject，只有 RectTransform，不挂载任何 UI 组件",
+    "字段类型必须是 Transform 或 RectTransform",
+    "运行时调用: ItemIconBase itemIcon = ItemIconBase.Allocate(m_ItemIconRoot);",
+    "专门用于显示游戏道具（装备、材料、货币、消耗品等）",
+    "使用频率: 142 次（项目中最高频的动态 UI 组件）"
+  ]
+}

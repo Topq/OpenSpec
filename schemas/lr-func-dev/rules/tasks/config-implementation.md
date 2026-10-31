@@ -60,7 +60,7 @@
 
 **任务类型**: ⚠️ 手工任务（策划执行）
 
-**文件**: `D:/se/design/table/default_ios/active_growthfund_main.xlsx`
+**文件**: `../design/table/default_ios/active_growthfund_main.xlsx`
 
 **操作步骤**:
 1. 在策划配置目录创建 `active_growthfund_main.xlsx`
@@ -79,7 +79,7 @@
 **任务类型**: ⚠️ 手工任务（客户端工程师执行）
 
 **操作步骤**:
-1. 打开终端，进入 `D:\se\develop\client\tools\table\`
+1. 打开终端，进入 `..\develop\client\tools\table\`
 2. 执行 `output_code_csharp.bat`
 3. 检查 `Assets/Script/Table/Data/TDActive_growthfund_mainTable.cs` 已生成
 
@@ -156,7 +156,7 @@ CodeGraph 查询：READ_FILE LoadResource txt.ReadInt 配置加载
 
 **任务类型**: ⚠️ 手工任务（策划执行）
 
-**文件**: `D:/se/design/table/default_ios/business_activity_maintimelist.xlsx`
+**文件**: `../design/table/default_ios/business_activity_maintimelist.xlsx`
 
 **操作步骤**:
 1. 打开现有 Excel 文件

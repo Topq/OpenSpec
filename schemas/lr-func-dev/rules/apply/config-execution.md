@@ -37,7 +37,7 @@
 
 ### 步骤 3.1：配置 outcode_config.json
 
-- 文件：`D:\se\develop\client\tools\table\table_config\outcode_config.json`
+- 文件：`..\develop\client\tools\table\table_config\outcode_config.json`
 - 根据 `design/config.md` 的"outcode_config.json 配置建议"：
   - 如果需要 `need_copy` → 在 `need_copy` 数组末尾添加表名（逗号分隔）
   - 如果需要 `NeedParseDataMethod` → 在 `NeedParseDataMethod` 数组末尾添加表名

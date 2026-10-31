@@ -79,57 +79,123 @@ description: 按框架约定清单检查代码质量（协议参数索引、框�
 
 ---
 
-### 步骤 2：获取实际改动文件（SVN 项目）
+### 步骤 2：获取目标文件清单
 
-**核心思路**：用 SVN 改动状态限定检查范围，避免 CodeGraph 搜索到历史同名模块。
+**核心思路**：优先从 `implementation-report.md` 读取精确的文件清单，回退到 SVN 改动状态作为 fallback。
 
-#### 2.1 获取服务端改动文件
-
-```bash
-cd D:/se/develop/server/project
-svn status | grep -E "^(M|A)" | awk '{print $2}' > /tmp/server_changed_files.txt
-```
-
-**过滤出本功能相关文件**（用 tasks.md 提取的模块名）：
-```bash
-grep -i "MixGrowthFund\|GrowthFund" /tmp/server_changed_files.txt
-```
-
-**示例输出**：
-```
-FsGame/ActivityModule/BusinessActivity/GrowthFund/MixGrowthFundEventCallBack.cpp
-FsGame/ActivityModule/BusinessActivity/GrowthFund/MixGrowthFundModule.h
-FsGame/ActivityModule/BusinessActivity/GrowthFund/MixGrowthFundModule.cpp
-```
-
-**如果为空**：说明服务端未改动（可能已实现），跳过服务端检查或报告"服务端无改动"。
+**方法选择逻辑**：
+1. **优先**：检查 `changes/<change-id>/implementation-report.md` 是否存在
+2. **如果存在且完整**：解析 report 获取文件清单（更精确、结构化）
+3. **如果不存在或不完整**：回退到 SVN status + 模块名过滤（兼容性方案）
 
 ---
 
-#### 2.2 获取客户端改动文件
+#### 2.1 方法 A：从 implementation-report.md 读取（推荐）
 
-```bash
-cd D:/se/develop/client/project
-svn status | grep -E "^(M|A)" | awk '{print $2}' > /tmp/client_changed_files.txt
-```
+**步骤**：
 
-**过滤出本功能相关文件**：
-```bash
-grep -i "MixGrowthFund\|GrowthFund" /tmp/client_changed_files.txt
-```
+1. **检查 report 是否存在**：
+   ```bash
+   test -f "changes/<change-id>/implementation-report.md" && echo "FOUND" || echo "NOT_FOUND"
+   ```
 
-**示例输出**：
+2. **读取 report 的"生成文件清单"章节**：
+   ```markdown
+   ## 2. 生成文件清单
+
+   ### 服务端模块 (`FsGame/ActivityModule/.../`)
+   - `ModuleFile.cpp` — 说明
+   - `ModuleFile.h` — 说明
+
+   ### 客户端逻辑模块 (`Assets/Script/LogicModule/.../`)
+   - `Module.cs` — 说明
+
+   ### 客户端 UI (`Assets/Script/UISript/.../`)
+   - `Panel.cs` — 说明
+   ```
+
+3. **提取文件路径**：
+   - 方法 1：提取反引号包裹的文件名（`` `文件名.ext` ``）
+   - 方法 2：提取路径前缀（章节标题 `(...)`）+ 文件名组合
+   - 方法 3：直接使用 grep 提取 `.cs` / `.cpp` / `.h` 结尾的行
+
+   **示例提取命令**：
+   ```bash
+   # 提取所有带反引号的文件名
+   grep -oP '`\K[^`]+\.(cs|cpp|h|txt|xlsx)' implementation-report.md
+
+   # 或：提取带章节前缀的完整路径
+   # （需结合 markdown 解析逻辑）
+   ```
+
+4. **按角色分类**：
+   - 服务端：`.cpp` / `.h` 文件
+   - 客户端：`.cs` 文件
+   - 配置表：`.txt` / `.xlsx` 文件
+
+**优势**：
+- ✅ 精确：apply 工具已验证的文件清单，无噪音
+- ✅ 结构化：按功能分组，便于理解
+- ✅ 完整：包含新增 + 修改的所有相关文件
+- ✅ 无需过滤：不受 SVN 大量无关改动干扰
+
+**示例输出**（从 report 提取）：
 ```
-Assets/Script/LogicModule/BusinessActivityModule/MixGrowthFundModule/MixGrowthFundModule.cs
-Assets/Script/LogicModule/BusinessActivityModule/MixGrowthFundModule/MixGrowthFundModule_Net.cs
-Assets/Script/UIScript/WelfareActivityPanel/MixGrowthFundPanel/MixGrowthFundPage.cs
-Assets/Script/UIScript/WelfareActivityPanel/MixGrowthFundPanel/MixGrowthFundRewardCell.cs
+服务端文件：
+  FsGame/ActivityModule/.../MixGrowthFundModule.cpp
+  FsGame/ActivityModule/.../MixGrowthFundModule.h
+
+客户端文件：
+  Assets/Script/LogicModule/.../MixGrowthFundModule.cs
+  Assets/Script/UISript/.../MixGrowthFundPanel.cs
 ```
 
 ---
 
-#### 2.3 从 tasks.md 提取预期模块名（用于过滤）
+#### 2.2 方法 B：从 SVN 状态读取（Fallback）
 
+**仅在以下情况使用**：
+- `implementation-report.md` 不存在（apply 未执行）
+- report 格式异常无法解析
+- 需要检查手动改动但未体现在 report 的文件
+
+**步骤**：
+
+1. **获取服务端改动文件**：
+   ```bash
+   cd ../develop/server/project
+   svn status | grep -E "^(M|A)" | awk '{print $2}' > /tmp/server_changed_files.txt
+   ```
+
+2. **过滤出本功能相关文件**（用 tasks.md 提取的模块名）：
+   ```bash
+   # 示例：模块名为 MixGrowthFund / GrowthFund
+   grep -i "MixGrowthFund\|GrowthFund" /tmp/server_changed_files.txt
+   ```
+
+3. **获取客户端改动文件**：
+   ```bash
+   cd ../develop/client/project
+   svn status | grep -E "^(M|A)" | awk '{print $2}' > /tmp/client_changed_files.txt
+   grep -i "MixGrowthFund\|GrowthFund" /tmp/client_changed_files.txt
+   ```
+
+**限制**：
+- ⚠️ 噪音大：可能包含数十/上百个无关文件（Packages/、SDK/、.meta）
+- ⚠️ 过滤可能失效：grep 关键词可能不匹配实际文件路径
+- ⚠️ 需要猜测：模块名可能与 tasks.md 描述不一致
+
+**如果为空**：说明该角色未改动（可能已实现），跳过该角色检查或报告"无改动"
+
+---
+
+#### 2.3 提取模块名（用于 CodeGraph 查询）
+
+**从 implementation-report.md 提取**（方法 A）：
+- 直接使用文件清单中的文件名作为查询关键词
+- 示例：从 `MarriageModule.cs` / `MarriageModule_Net.cs` 提取 → 查询关键词 `MarriageModule`
+
+**从 tasks.md 提取**（方法 B fallback）：
 ```bash
 Read(changes/{change-id}/tasks.md)
 ```
@@ -139,11 +205,13 @@ Read(changes/{change-id}/tasks.md)
 - 客户端模块名：从 "## 4. 客户端实现" 提取（如 `MixGrowthFundModule`）
 - 配置表名：从 "## 2. 配置表" 提取（如 `active_fund_main`）
 
-**用途**：作为 `svn status` 输出的 grep 关键词，过滤出相关文件。
+**用途**：
+- 方法 A：直接作为 CodeGraph 查询关键词（文件清单已明确）
+- 方法 B：作为 `svn status` 输出的 grep 过滤关键词
 
 ---
 
-#### 2.4 完整性检查：对比 tasks.md 和实际改动
+#### 2.4 （可选）完整性检查：对比 tasks.md 和实际文件
 
 **任务文件映射表**（从 tasks.md 提取）：
 - 任务 3.1：服务端 `MixGrowthFundModule.h/cpp`
@@ -151,8 +219,12 @@ Read(changes/{change-id}/tasks.md)
 - 任务 4.5：客户端 UI `MixGrowthFundPage.cs`
 
 **对比逻辑**：
-- tasks.md 说要改的文件 ∉ svn status 输出 → 报告"缺失实施"
-- svn status 输出的文件 ∉ tasks.md 提到的 → 报告"额外改动"（可能是合理的，需人工确认）
+- **方法 A**：report 文件清单 vs tasks.md 预期
+  - tasks.md 说要实现的文件 ∉ report 清单 → 报告"缺失实施"
+  - report 清单文件 ∉ tasks.md → 报告"额外实施"（可能合理，需人工确认）
+- **方法 B**：svn status vs tasks.md 预期（同上）
+
+**注意**：此步骤为可选，主要用于发现遗漏。质量检查（步骤 3-5）会通过 CodeGraph 搜索直接验证模块是否存在。
 
 ---
 
@@ -162,7 +234,7 @@ Read(changes/{change-id}/tasks.md)
 
 ```bash
 codegraph_explore("MixGrowthFundModule OnCustom LoadResource", 
-                  projectPath: "D:/se/develop/server/project")
+                  projectPath: "../develop/server/project")
 ```
 
 - **找不到** → 报告"缺失实施：预期有服务端 MixGrowthFundModule，但搜索不到"，跳过后续质量检查
@@ -177,7 +249,7 @@ codegraph_explore("MixGrowthFundModule OnCustom LoadResource",
 **检查方法**:
 ```bash
 codegraph_explore("OnCustom protocol handler args.IntVal MixGrowthFundModule", 
-                  projectPath: "D:/se/develop/server/project")
+                  projectPath: "../develop/server/project")
 ```
 
 查询结果中搜索 `args.IntVal(0)` 或 `args.StringVal(0)`。
@@ -205,7 +277,7 @@ int OnCustomGetReward(..., const IVarList& args) {
 
 **检查方法**:
 ```bash
-Grep("return ERR_", path: "D:/se/develop/server/project/SourceModule/ActivityModule/MixGrowthFundModule.cpp")
+Grep("return ERR_", path: "../develop/server/project/SourceModule/ActivityModule/MixGrowthFundModule.cpp")
 ```
 
 统计：
@@ -225,7 +297,7 @@ Grep("return ERR_", path: "D:/se/develop/server/project/SourceModule/ActivityMod
 **检查方法**:
 ```bash
 codegraph_explore("LoadResource READ_FILE txt.ReadInt MixGrowthFundModule", 
-                  projectPath: "D:/se/develop/server/project")
+                  projectPath: "../develop/server/project")
 ```
 
 对比 design.md 附录 C 的字段名。
@@ -243,7 +315,7 @@ codegraph_explore("LoadResource READ_FILE txt.ReadInt MixGrowthFundModule",
 **检查方法**:
 ```bash
 codegraph_explore("FindRecord MixGrowthFundModule null check", 
-                  projectPath: "D:/se/develop/server/project")
+                  projectPath: "../develop/server/project")
 ```
 
 **违反示例**:
@@ -270,7 +342,7 @@ int activityID = rec->QueryInt(0, GROWTH_FUND_OPEN_REC_ACTIVITYID);
 **检查方法**:
 ```bash
 codegraph_explore("OnCellUpdated signature GrowthFundRewardCell", 
-                  projectPath: "D:/se/develop/client/project")
+                  projectPath: "../develop/client/project")
 ```
 
 **检查点**:
@@ -292,7 +364,7 @@ void DetachPage(AbstractPage page) { }             // ❌ 单 t 拼写错误
 **检查方法**:
 ```bash
 codegraph_explore("DirtyRedPoint MixGrowthFundModule RefreshUI Update", 
-                  projectPath: "D:/se/develop/client/project")
+                  projectPath: "../develop/client/project")
 ```
 
 **违反示例**:
@@ -319,7 +391,7 @@ void OnGrowthFundOpenRecChanged() {  // Record Hook 回调
 **检查方法**:
 ```bash
 codegraph_explore("RegisterRedPointCallback BusinessActivityModule MixGrowthFundModule", 
-                  projectPath: "D:/se/develop/client/project")
+                  projectPath: "../develop/client/project")
 ```
 
 **必需调用**:
@@ -337,7 +409,7 @@ codegraph_explore("RegisterRedPointCallback BusinessActivityModule MixGrowthFund
 2. 使用 CodeGraph 搜索协议处理函数：
 ```bash
 codegraph explore "OnRecv IVarList GetInt32 <模块名>Module" \
-  --project D:/se/develop/client/project
+  --project ../develop/client/project
 ```
 
 **检查规则**：
@@ -382,7 +454,7 @@ codegraph explore "OnRecv IVarList GetInt32 <模块名>Module" \
 2. 使用 CodeGraph 搜索 ParamArgs 方法：
 ```bash
 codegraph explore "ParamArgs IVarList BAActivityInfoIndex <模块名>Module" \
-  --project D:/se/develop/client/project
+  --project ../develop/client/project
 ```
 
 **检查规则**：
@@ -426,7 +498,7 @@ codegraph explore "ParamArgs IVarList BAActivityInfoIndex <模块名>Module" \
 
 **检查方法**:
 ```bash
-Read(D:/se/develop/client/tools/table/table_config/outcode_config.json)
+Read(../develop/client/project/tools/table/table_config/outcode_config.json)
 ```
 
 **检查点**:
@@ -460,8 +532,8 @@ Write(changes/{change-id}/code-review-report.md)
 **检查清单**: 18 项框架约定
 **文件范围**: 见 implementation-report.md
 **项目路径**:
-- 服务端: D:/se/develop/server/project
-- 客户端: D:/se/develop/client/project
+- 服务端: ../develop/server/project
+- 客户端: ../develop/client/project
 
 ---
 
@@ -629,7 +701,7 @@ int nRechargeID = txt.ReadInt(i, "RechargeId");
 1. 用 CodeGraph 查询符号源码
    ```bash
    codegraph_explore("OnCustomGetReward args.IntVal", 
-                     projectPath: "D:/se/develop/server/project")
+                     projectPath: "../develop/server/project")
    ```
 2. AI 阅读返回的源码，判断是否符合检查项要求
 3. 输出判断结果和证据（代码位置 + 代码片段）

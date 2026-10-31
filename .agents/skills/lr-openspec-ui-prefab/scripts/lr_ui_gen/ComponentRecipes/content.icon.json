@@ -1,0 +1,23 @@
+{
+  "semanticId": "content.icon",
+  "componentType": "UnityEngine.GameObject",
+  "description": "静态图标组件。用于 UI 状态标识（锁定徽章、已领取遮罩等）和固定的功能图标，图片在设计期确定。",
+  "components": [
+    {
+      "type": "UnityEngine.UI.Image",
+      "properties": {
+        "sprite": "Assets/UI/AtlasResources/FuncMenuListIcon/zjm_icon_07.png",
+        "raycastTarget": false
+      }
+    }
+  ],
+  "hierarchy": [],
+  "notes": [
+    "默认图标: zjm_icon_07.png",
+    "raycastTarget=false 不响应点击事件（通常由父节点按钮响应）",
+    "典型用途：LockBadge、ClaimedMask、完成标记等状态徽章",
+    "使用图集贴图，性能最优，不需要运行时加载",
+    "对比 content.async-icon：后者用于运行时异步加载的非道具图标（如头像）",
+    "对比 content.item-icon-root：后者是道具专用动态容器，运行时实例化完整组件"
+  ]
+}

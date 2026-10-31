@@ -56,7 +56,12 @@ namespace LRUIPrefabGen
             // (e.g. a Row/Cell MonoBehaviour) as it builds the tree, via
             // ComponentRecipes.AddLRComponentPublic. Only the *page-level*
             // root script (rootScriptTypeName) needs attaching here.
-            GameObject rootGo = BuildNode(root, null);
+
+            // 坐标转换公式的初始值：根节点的pos作为第一层的"括号公式值"
+            var rootPos = ReadVector2(root["pos"]);
+            Vector2 initialFormulaValue = rootPos.HasValue ? rootPos.Value : Vector2.zero;
+
+            GameObject rootGo = BuildNode(root, null, null, initialFormulaValue);
 
             Component rootComponent = null;
             if (!string.IsNullOrEmpty(rootScriptTypeName))
@@ -82,6 +87,7 @@ namespace LRUIPrefabGen
             // 结构约定注入（Phase 0.5）：在保存 Prefab 前，对内存中的 GameObject 树进行
             // 约定性结构补全，不依赖 TSX 中的显式声明。
             string rootComponentId = (string)root["component"];
+
             // surface.page 根节点（内嵌页面，无 Canvas）：自动注入 Root 满铺容器，包裹所有子节点。
             // 参考：MixGrowthFundPage.prefab 中 MixGrowthFundPage/Root/...
             if (rootComponentId == "surface.page")
@@ -89,11 +95,26 @@ namespace LRUIPrefabGen
                 InjectRootWrapper(rootGo);
             }
 
+            // surface.panel 根节点（独立弹窗/全屏面板，有 Canvas）：自动创建 Screen/PowerSaveMode 节点
+            if (rootComponentId == "surface.panel")
+            {
+                InjectScreenNode(rootGo);
+                InjectPowerSaveModeNode(rootGo);
+                InjectWindowImageNode(rootGo);
+            }
+
             string fullPrefabPath = prefabPath.EndsWith(".prefab") ? prefabPath : prefabPath + ".prefab";
-            string dir = Path.GetDirectoryName(fullPrefabPath);
+            fullPrefabPath = fullPrefabPath.Replace("\\", "/");
+
+            // AssetDatabase 的所有路径 API 只认正斜杠，而 Path.GetDirectoryName 在 Windows
+            // 上返回反斜杠路径——不归一化会让 IsValidFolder 永远返回 false、
+            // CreateFolderRecursive 又拆不出层级，导致目标目录建不出来，
+            // 最终 SaveAsPrefabAsset 抛 "Given path does not exist"。
+            string dir = Path.GetDirectoryName(fullPrefabPath).Replace("\\", "/");
             if (!string.IsNullOrEmpty(dir) && !AssetDatabase.IsValidFolder(dir))
             {
                 CreateFolderRecursive(dir);
+                AssetDatabase.Refresh();
             }
 
             // Phase 1: 写出基础 Prefab（层级 + RectTransform + 组件 + 根脚本字段绑定）。
@@ -118,7 +139,8 @@ namespace LRUIPrefabGen
 
         static void CreateFolderRecursive(string path)
         {
-            string[] parts = path.Split('/');
+            // 防御：AssetDatabase 只认正斜杠，调用方可能传入 Windows 反斜杠路径
+            string[] parts = path.Replace("\\", "/").Split('/');
             string current = parts[0];
             for (int i = 1; i < parts.Length; i++)
             {
@@ -135,12 +157,26 @@ namespace LRUIPrefabGen
         // Node construction
         // ------------------------------------------------------------------
 
-        static GameObject BuildNode(JObject node, Transform parent)
+        /// <summary>
+        /// 布局容器类组件：它们建立新的坐标原点，后代的 pos 直接就是相对自己的偏移，
+        /// 所以要把嵌套括号链清零。其它组件（按钮、文本、图标、列表…）不是容器，
+        /// 后代的 pos 仍以上一层容器为原点，链条继续累积。
+        /// </summary>
+        static readonly HashSet<string> LayoutContainerComponents = new HashSet<string>
         {
+            "surface.page",
+            "surface.panel",
+            "surface.modal",
+        };
+
+        static GameObject BuildNode(JObject node, Transform parent, JObject parentNode, Vector2 formulaRightPart)
+        {
+            bool isRoot = (parent == null);
+
             string prefabAssetPath = (string)node["prefabAssetPath"];
             if (!string.IsNullOrEmpty(prefabAssetPath))
             {
-                return InstantiatePrefabAsset(node, parent, prefabAssetPath);
+                return InstantiatePrefabAsset(node, parent, parentNode, formulaRightPart, prefabAssetPath);
             }
 
             string name = (string)node["name"] ?? "UnnamedNode";
@@ -150,16 +186,16 @@ namespace LRUIPrefabGen
                 go.transform.SetParent(parent, false);
             }
 
-            ApplyRectTransform(go.GetComponent<RectTransform>(), node);
+            ApplyRectTransform(go.GetComponent<RectTransform>(), node, parentNode, formulaRightPart);
 
             string component = (string)node["component"];
             if (!string.IsNullOrEmpty(component))
             {
-                ComponentRecipes.Apply(go, component, node);
+                ComponentRecipes.Apply(go, component, node, isRoot);
             }
 
             // Canvas 组件添加时会重置 RectTransform 属性，根节点需要在此之后再次强制设置
-            if (parent == null)
+            if (isRoot)
             {
                 var rect = go.GetComponent<RectTransform>();
                 rect.anchorMin = Vector2.zero;
@@ -176,19 +212,43 @@ namespace LRUIPrefabGen
                 ComponentRecipes.AddLRComponentPublic(go, lrComponent);
             }
 
+            // data-visible="false"：状态互斥的隐藏占位节点（"已领取"标记等）。
+            // 列表 Cell 模板不需要显式写这个属性——ConfigureSingleScrollView 会统一关掉，
+            // 与项目里现有 Prefab 的 m_CellTemplate 一致（模板节点始终 m_IsActive: 0）。
+            if (string.Equals((string)node["visible"], "false", StringComparison.OrdinalIgnoreCase))
+            {
+                go.SetActive(false);
+            }
+
             var childrenToken = node["children"] as JArray;
             if (childrenToken != null)
             {
+                // 计算传递给"子节点"的括号公式值。当前节点自身的 anchoredPosition 上面
+                // ApplyRectTransform 已经用传入的 formulaRightPart 算过了，这里只决定后代怎么算：
+                //
+                // - 布局容器（LayoutContainerComponents）：建立新原点，给后代清零，
+                //   于是容器内所有后代的 pos 都直接作为 anchoredPosition
+                // - 其它节点（根节点、按钮、文本、图标、列表…）：不建立新原点，原样透传。
+                //   非容器节点如果在这里推进链条（pos - formulaRightPart），容器的清零就只能
+                //   生效一层——孙节点会再以父节点的偏移为原点算一遍而被顶走，
+                //   例如 Cell 里的文本、按钮上的红点角标。透传才能让清零一路传到深层后代。
+                Vector2 childFormulaRightPart = formulaRightPart;
+
+                if (!isRoot && LayoutContainerComponents.Contains((string)node["component"]))
+                {
+                    childFormulaRightPart = Vector2.zero;
+                }
+
                 foreach (JObject child in childrenToken.OfType<JObject>())
                 {
-                    BuildChildOrPrefabRef(child, go.transform);
+                    BuildChildOrPrefabRef(child, go.transform, node, childFormulaRightPart);
                 }
             }
 
             return go;
         }
 
-        static void BuildChildOrPrefabRef(JObject child, Transform parent)
+        static void BuildChildOrPrefabRef(JObject child, Transform parent, JObject parentNode, Vector2 formulaRightPart)
         {
             string prefabChildPath = (string)child["prefabChildPath"];
             if (!string.IsNullOrEmpty(prefabChildPath))
@@ -214,16 +274,16 @@ namespace LRUIPrefabGen
                 {
                     foreach (JObject grandChild in nested.OfType<JObject>())
                     {
-                        BuildChildOrPrefabRef(grandChild, existing);
+                        BuildChildOrPrefabRef(grandChild, existing, child, formulaRightPart);
                     }
                 }
                 return;
             }
 
-            BuildNode(child, parent);
+            BuildNode(child, parent, parentNode, formulaRightPart);
         }
 
-        static GameObject InstantiatePrefabAsset(JObject node, Transform parent, string prefabAssetPath)
+        static GameObject InstantiatePrefabAsset(JObject node, Transform parent, JObject parentNode, Vector2 formulaRightPart, string prefabAssetPath)
         {
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabAssetPath);
             if (prefab == null)
@@ -241,12 +301,12 @@ namespace LRUIPrefabGen
             var rect = instance.GetComponent<RectTransform>();
             if (rect != null)
             {
-                ApplyRectTransform(rect, node);
+                ApplyRectTransform(rect, node, parentNode, formulaRightPart);
             }
             return instance;
         }
 
-        static void ApplyRectTransform(RectTransform rect, JObject node)
+        static void ApplyRectTransform(RectTransform rect, JObject node, JObject parentNode, Vector2 formulaRightPart)
         {
             // Prefab 根节点默认值：满铺锚点 + 居中 pivot + 正常缩放
             // 参考所有现有 Panel Prefab（SeasonMainPanel0、AdventureBlendEntryPanel 等）
@@ -286,10 +346,30 @@ namespace LRUIPrefabGen
                 rect.pivot = pivot.Value;
             }
 
+            // 坐标转换公式（嵌套括号形式），沿 surface.panel 链展开：
+            // 根节点：anchoredPosition = (0, 0)
+            // 第2层：anchoredPosition = 当前pos - 根pos
+            // 第3层：anchoredPosition = 当前pos - (第2层pos - 根pos)
+            // 第4层：anchoredPosition = 当前pos - (第3层pos - (第2层pos - 根pos))
+            //
+            // formulaRightPart 传递的是"括号内的公式值"：
+            // - 对于根节点的子节点：formulaRightPart = 根pos
+            // - 对于 surface.panel 的后代：formulaRightPart = 该 panel 的 anchoredPosition
+            // - 对于 surface.page 的后代：formulaRightPart = (0,0)，
+            //   page 下的 pos 已经是相对父节点的偏移，直接作为 anchoredPosition
             var pos = ReadVector2(node["pos"]);
             if (pos.HasValue)
             {
-                rect.anchoredPosition = pos.Value;
+                if (isRoot)
+                {
+                    // 根节点：满铺锚点下，anchoredPosition 必须是 (0,0)
+                    rect.anchoredPosition = Vector2.zero;
+                }
+                else
+                {
+                    // 非根节点：当前pos - formulaRightPart
+                    rect.anchoredPosition = pos.Value - formulaRightPart;
+                }
             }
 
             var size = ReadVector2(node["size"]);
@@ -470,16 +550,11 @@ namespace LRUIPrefabGen
             var localizerEntries = new System.Collections.Generic.List<(string key, string defaultText, string path)>();
             PostProcessNode(jsonRoot, prefabAsset, ref localizerCount, ref scrollViewCount, localizerEntries);
 
-            // 结构约定注入（Phase 2.5）：对已保存的 Prefab 资产补全 Screen/PowerSaveMode 组件。
-            // surface.panel 根节点（独立弹窗/全屏面板，有 Canvas）：
-            //   - 名为 "Screen" 的直接子节点 → 添加 Image（半透明黑色遮罩）+ CanvasGroup
-            //   - 名为 "PowerSaveMode" 的直接子节点 → 添加 LR.SwitchMainCamera + PowerSaveMode
-            string rootComp = (string)jsonRoot["component"];
-            if (rootComp == "surface.panel")
-            {
-                PatchScreenNode(prefabAsset);
-                PatchPowerSaveModeNode(prefabAsset);
-            }
+            // Phase 2.5: 已移除 FixWindowNodePosition 调用
+            // 坐标应该在 ApplyRectTransform 中根据父节点正确转换
+
+            // Phase 2.6: 设置所有节点 Layer 为 UI
+            SetLayerRecursively(prefabAsset, LayerMask.NameToLayer("UI"));
 
             EditorUtility.SetDirty(prefabAsset);
             PrefabUtility.SavePrefabAsset(prefabAsset);
@@ -551,8 +626,10 @@ namespace LRUIPrefabGen
                 }
             }
 
-            // list.single-scroll -> 配置 CellTemplate/CellWidth/CellHeight
-            if (component == "list.single-scroll")
+            // list.single-scroll / list.scroll -> 配置 CellTemplate/CellWidth/CellHeight。
+            // m_CellTemplate 是基类 LR.ScrollView 的字段，多列网格列表同样需要模板
+            // （项目里 400 个用 LR.ScrollView 的 Prefab 有 393 个 m_CellTemplate 非空）。
+            if (component == "list.single-scroll" || component == "list.scroll")
             {
                 if (ConfigureSingleScrollView(node, go))
                 {
@@ -618,13 +695,20 @@ namespace LRUIPrefabGen
 
         /// <summary>
         /// Configures m_CellTemplate / m_CellWidth / m_CellHeight on a list.single-scroll
-        /// node's ScrollView component via SerializedObject, per the standard pattern:
-        /// SerializedObject -> FindProperty -> set value -> ApplyModifiedProperties.
+        /// or list.scroll node's ScrollView component via SerializedObject, per the
+        /// standard pattern: SerializedObject -> FindProperty -> set value ->
+        /// ApplyModifiedProperties. These three fields are declared on the base
+        /// LR.ScrollView, so both recipes go through here.
         /// Returns true if a template was found and fields were applied.
         /// </summary>
         static bool ConfigureSingleScrollView(JObject node, GameObject go)
         {
             Component scrollView = go.GetComponent("LR.SingleScrollView");
+            if (scrollView == null)
+            {
+                scrollView = go.GetComponent("LR.ScrollView");
+            }
+
             if (scrollView == null)
             {
                 scrollView = go.GetComponent<ScrollRect>();
@@ -670,6 +754,10 @@ namespace LRUIPrefabGen
             heightProp.intValue = cellHeight;
             serializedObject.ApplyModifiedProperties();
 
+            // 模板节点本身不参与显示，运行时由 ObjectCache 复制出真正的 Cell。
+            // 项目里所有现有 Prefab 的 m_CellTemplate 都是 m_IsActive: 0，这里对齐。
+            templateTransform.gameObject.SetActive(false);
+
             Debug.Log($"[LRUnityLayoutPrefabGenerator] 配置 SingleScrollView {go.name}: CellTemplate={templateTransform.name}, CellWidth={cellWidth}, CellHeight={cellHeight}");
             return true;
         }
@@ -678,11 +766,14 @@ namespace LRUIPrefabGen
         /// Walks a list.single-scroll JSON node's children in lockstep with the real
         /// Transform hierarchy, looking for the first descendant that marks itself as
         /// the reusable cell template, and returns its actual Transform. A node marks
-        /// itself as the template either by carrying data-lr-component (the preferred
-        /// way once the cell has its own MonoBehaviour, e.g. data-lr-component=
-        /// "LR.MixGrowthFundRewardTierRow") or, for backwards compatibility with TSX
-        /// written before that attribute existed, by a data-field name containing
-        /// "Template".
+        /// itself as the template in one of three ways:
+        ///   - data-cell-template="true" -- the explicit marker, needed when the cell
+        ///     has neither its own MonoBehaviour nor a [SerializeField] on the page
+        ///     script (the page's onCellUpdate just does root.Find("TxtXxx"))
+        ///   - data-lr-component -- the cell has its own MonoBehaviour, e.g.
+        ///     data-lr-component="LR.MixGrowthFundRewardTierRow"
+        ///   - a data-field name containing "Template" -- backwards compatibility with
+        ///     TSX written before the two attributes above existed
         ///
         /// Important: a data-prefab-child-path wrapper (e.g. "Viewport/Content") does
         /// not create a new GameObject -- BuildChildOrPrefabRef finds the *existing*
@@ -752,7 +843,10 @@ namespace LRUIPrefabGen
 
                 string lrComponent = (string)child["lrComponent"];
                 string fieldName = (string)child["field"];
-                if (!string.IsNullOrEmpty(lrComponent) || (!string.IsNullOrEmpty(fieldName) && fieldName.Contains("Template")))
+                bool markedAsCellTemplate = string.Equals((string)child["cellTemplate"], "true", StringComparison.OrdinalIgnoreCase);
+                if (markedAsCellTemplate
+                    || !string.IsNullOrEmpty(lrComponent)
+                    || (!string.IsNullOrEmpty(fieldName) && fieldName.Contains("Template")))
                 {
                     return childTransform;
                 }
@@ -829,18 +923,282 @@ namespace LRUIPrefabGen
             // 创建 Root 满铺容器
             var rootNode = new GameObject("Root", typeof(RectTransform));
             rootNode.transform.SetParent(rootGo.transform, false);
+
+            // [注释] 不再强制设置 Root 的 RectTransform 属性，让它按 TSX 定义来
+            /*
             var rt = rootNode.GetComponent<RectTransform>();
             rt.anchorMin = Vector2.zero;
             rt.anchorMax = Vector2.one;
             rt.anchoredPosition = Vector2.zero;
             rt.sizeDelta = Vector2.zero;
             rt.pivot = new Vector2(0.5f, 0.5f);
+            */
 
             // 把所有原有子节点移入 Root
             foreach (var child in children)
                 child.SetParent(rootNode.transform, false);
 
             Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectRootWrapper: {rootGo.name} → Root 注入完成，{children.Count} 个子节点移入");
+        }
+
+        /// <summary>
+        /// 递归设置 GameObject 及其所有子节点的 Layer
+        /// </summary>
+        static void SetLayerRecursively(GameObject go, int layer)
+        {
+            go.layer = layer;
+            foreach (Transform child in go.transform)
+            {
+                SetLayerRecursively(child.gameObject, layer);
+            }
+        }
+
+        /// <summary>
+        /// Phase 0.5: surface.panel 根节点自动注入 Screen 遮罩节点。
+        /// 在 TSX 子节点之前插入，作为最底层的半透明背景遮罩。
+        /// </summary>
+        static void InjectScreenNode(GameObject rootGo)
+        {
+            GameObject screenGo = null;
+            bool needCreate = false;
+
+            // 检查是否已经有 Screen 节点
+            var screenTransform = rootGo.transform.Find("Screen");
+            if (screenTransform != null)
+            {
+                screenGo = screenTransform.gameObject;
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectScreenNode: Screen 节点已存在，检查组件完整性");
+            }
+            else
+            {
+                // 创建 Screen 节点（满铺、半透明遮罩）
+                screenGo = new GameObject("Screen", typeof(RectTransform));
+                screenGo.transform.SetParent(rootGo.transform, false);
+                screenGo.transform.SetAsFirstSibling();  // 放在最底层
+                needCreate = true;
+
+                var screenRect = screenGo.GetComponent<RectTransform>();
+                screenRect.anchorMin = Vector2.zero;
+                screenRect.anchorMax = Vector2.one;
+                screenRect.anchoredPosition = Vector2.zero;
+                screenRect.sizeDelta = Vector2.zero;
+                screenRect.pivot = new Vector2(0.5f, 0.5f);
+            }
+
+            // 确保有 Image 组件（遮罩底色 #0000009A = rgba(0,0,0,0.6)）
+            var image = screenGo.GetComponent<Image>();
+            if (image == null)
+            {
+                image = screenGo.AddComponent<Image>();
+                image.color = new Color(0f, 0f, 0f, 0.6f);
+                image.raycastTarget = true;
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectScreenNode: {screenGo.name} 添加 Image 组件");
+            }
+
+            // 确保有 CanvasGroup 组件（控制整体透明度和交互屏蔽）
+            if (screenGo.GetComponent<CanvasGroup>() == null)
+            {
+                screenGo.AddComponent<CanvasGroup>();
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectScreenNode: {screenGo.name} 添加 CanvasGroup 组件");
+            }
+
+            if (needCreate)
+            {
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectScreenNode: {rootGo.name} → Screen 节点已注入");
+            }
+        }
+
+        /// <summary>
+        /// Phase 0.5: surface.panel 根节点自动注入 PowerSaveMode 节点。
+        /// 放在 Screen 之后，用于控制相机渲染模式。
+        /// </summary>
+        static void InjectPowerSaveModeNode(GameObject rootGo)
+        {
+            // 如果已经有 PowerSaveMode 节点，跳过
+            if (rootGo.transform.Find("PowerSaveMode") != null)
+            {
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectPowerSaveModeNode: PowerSaveMode 节点已存在，跳过创建");
+                return;
+            }
+
+            // 创建 PowerSaveMode 节点（满铺、不可见）
+            var pmGo = new GameObject("PowerSaveMode", typeof(RectTransform));
+            pmGo.transform.SetParent(rootGo.transform, false);
+
+            // 放在 Screen 之后（索引 1）
+            int screenIndex = -1;
+            for (int i = 0; i < rootGo.transform.childCount; i++)
+            {
+                if (rootGo.transform.GetChild(i).name == "Screen")
+                {
+                    screenIndex = i;
+                    break;
+                }
+            }
+            if (screenIndex >= 0)
+            {
+                pmGo.transform.SetSiblingIndex(screenIndex + 1);
+            }
+
+            var pmRect = pmGo.GetComponent<RectTransform>();
+            pmRect.anchorMin = Vector2.zero;
+            pmRect.anchorMax = Vector2.one;
+            pmRect.anchoredPosition = Vector2.zero;
+            pmRect.sizeDelta = Vector2.zero;
+            pmRect.pivot = new Vector2(0.5f, 0.5f);
+
+            // 添加 LR.SwitchMainCamera
+            Type switchCamType = FindType("LR.SwitchMainCamera");
+            if (switchCamType != null)
+            {
+                pmGo.AddComponent(switchCamType);
+            }
+
+            // 添加 PowerSaveMode
+            Type powerSaveType = FindType("PowerSaveMode");
+            if (powerSaveType != null)
+            {
+                pmGo.AddComponent(powerSaveType);
+            }
+
+            Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectPowerSaveModeNode: {rootGo.name} → PowerSaveMode 节点已注入");
+        }
+
+        /// <summary>
+        /// Phase 0.5: surface.panel 根节点下的 Window 节点自动添加 Image 组件作为底框。
+        /// 在生成 Panel 时，为 Window 节点添加白色 Image 组件，确保至少有一个可见的底框。
+        /// </summary>
+        static void InjectWindowImageNode(GameObject rootGo)
+        {
+            // 查找 Window 节点（通常在根节点下第一层）
+            Transform windowTransform = rootGo.transform.Find("Window");
+            if (windowTransform == null)
+            {
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectWindowImageNode: 未找到 Window 节点，跳过添加 Image");
+                return;
+            }
+
+            GameObject windowGo = windowTransform.gameObject;
+
+            // 检查是否已经有 Image 组件
+            var existingImage = windowGo.GetComponent<Image>();
+            if (existingImage != null)
+            {
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectWindowImageNode: Window 节点已有 Image 组件，跳过添加");
+                return;
+            }
+
+            // 添加 Image 组件
+            var image = windowGo.AddComponent<Image>();
+            image.color = new Color(1f / 255f, 1f / 255f, 1f / 255f, 204f / 255f);  // RGB(1,1,1) Alpha=204
+            image.raycastTarget = true;
+
+            Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectWindowImageNode: Window 节点已添加 Image 组件（颜色: #010101, Alpha=204）");
+        }
+
+        /// <summary>
+        /// 确保 Screen 节点存在，如果不存在则创建，然后补全组件。
+        /// </summary>
+        static void EnsureAndPatchScreenNode(GameObject rootGo)
+        {
+            var screenTransform = rootGo.transform.Find("Screen");
+            GameObject screenGo;
+
+            if (screenTransform == null)
+            {
+                // 使用 Prefab 编辑上下文创建节点（确保能保存到 Prefab 资产）
+                string prefabPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(rootGo);
+                if (string.IsNullOrEmpty(prefabPath))
+                {
+                    // rootGo 本身就是 Prefab 资产，需要在其根下创建
+                    screenGo = new GameObject("Screen", typeof(RectTransform));
+                    screenGo.transform.SetParent(rootGo.transform, false);
+                }
+                else
+                {
+                    // rootGo 是 Prefab 实例，直接创建即可
+                    screenGo = new GameObject("Screen", typeof(RectTransform));
+                    screenGo.transform.SetParent(rootGo.transform, false);
+                }
+
+                screenGo.transform.SetAsFirstSibling();  // 放在最底层
+
+                var screenRect = screenGo.GetComponent<RectTransform>();
+                screenRect.anchorMin = Vector2.zero;
+                screenRect.anchorMax = Vector2.one;
+                screenRect.anchoredPosition = Vector2.zero;
+                screenRect.sizeDelta = Vector2.zero;
+                screenRect.pivot = new Vector2(0.5f, 0.5f);
+
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] EnsureAndPatchScreenNode: 自动创建 Screen 节点");
+            }
+            else
+            {
+                screenGo = screenTransform.gameObject;
+            }
+
+            // 添加 Image（遮罩底色）
+            var image = screenGo.GetComponent<Image>();
+            if (image == null)
+            {
+                image = screenGo.AddComponent<Image>();
+                image.color = new Color(0f, 0f, 0f, 0.6f);
+                image.raycastTarget = true;
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] EnsureAndPatchScreenNode: {screenGo.name} 添加 Image（#0000009A）");
+            }
+
+            // 添加 CanvasGroup（控制整体透明度和交互屏蔽）
+            if (screenGo.GetComponent<CanvasGroup>() == null)
+            {
+                screenGo.AddComponent<CanvasGroup>();
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] EnsureAndPatchScreenNode: {screenGo.name} 添加 CanvasGroup");
+            }
+        }
+
+        /// <summary>
+        /// 确保 PowerSaveMode 节点存在，如果不存在则创建，然后补全组件。
+        /// </summary>
+        static void EnsureAndPatchPowerSaveModeNode(GameObject rootGo)
+        {
+            var pmTransform = rootGo.transform.Find("PowerSaveMode");
+            GameObject pmGo;
+
+            if (pmTransform == null)
+            {
+                // 创建 PowerSaveMode 节点（满铺、不可见）
+                pmGo = new GameObject("PowerSaveMode", typeof(RectTransform));
+                pmGo.transform.SetParent(rootGo.transform, false);
+                pmGo.transform.SetSiblingIndex(1);  // 放在 Screen 后面
+
+                var pmRect = pmGo.GetComponent<RectTransform>();
+                pmRect.anchorMin = Vector2.zero;
+                pmRect.anchorMax = Vector2.one;
+                pmRect.anchoredPosition = Vector2.zero;
+                pmRect.sizeDelta = Vector2.zero;
+                pmRect.pivot = new Vector2(0.5f, 0.5f);
+
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] EnsureAndPatchPowerSaveModeNode: 自动创建 PowerSaveMode 节点");
+            }
+            else
+            {
+                pmGo = pmTransform.gameObject;
+            }
+
+            // 添加 LR.SwitchMainCamera
+            Type switchCamType = FindType("LR.SwitchMainCamera");
+            if (switchCamType != null && pmGo.GetComponent(switchCamType) == null)
+            {
+                pmGo.AddComponent(switchCamType);
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] EnsureAndPatchPowerSaveModeNode: {pmGo.name} 添加 LR.SwitchMainCamera");
+            }
+
+            // 添加 PowerSaveMode
+            Type powerSaveType = FindType("PowerSaveMode");
+            if (powerSaveType != null && pmGo.GetComponent(powerSaveType) == null)
+            {
+                pmGo.AddComponent(powerSaveType);
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] EnsureAndPatchPowerSaveModeNode: {pmGo.name} 添加 PowerSaveMode");
+            }
         }
 
         /// <summary>

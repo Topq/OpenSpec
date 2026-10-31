@@ -1,0 +1,5 @@
+# 会话临时区与凭据不入库(与 lr-design 共用同一份飞书应用,但各自维护一份 config.json)
+tmp/
+config.json
+__pycache__/
+*.pyc

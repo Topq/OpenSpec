@@ -21,7 +21,7 @@
 | **是否需接入 BA 框架** | `BusinessActivityModule BusinessActivityDefine <功能关键词>` | 判断是否复用活动框架 |
 | **UI 组件是否存在** | `<功能名>Panel AbstractPanel` | 判断是新建还是修改 |
 
-**项目路径**: `D:/se/develop/client/project`
+**项目路径**: `../develop/client/project`
 
 ### 调查结果的文档体现
 
@@ -121,7 +121,147 @@ UI 监听 Record 变化，自动刷新
 
 ---
 
-### 1.3 协议解析起始索引规范（阻断性）
+### 1.3 玩家属性监听架构规则
+
+**适用场景**：功能需要监听玩家属性变化（如婚姻状态、好友申请、公会邀请、邮件通知等）
+
+#### 属性分类原则
+
+根据业务语义，玩家属性分为三类：
+
+| 属性类型 | 业务特征 | 处理方式 | 示例 |
+|---------|---------|---------|------|
+| **主动弹窗类** | 收到请求、通知，需要用户立即响应 | **独立回调 + 强制弹窗** | `WeddingReceiveProposalRoleId`, `FriendApplyList`, `GuildInviteRoleId`, `MailNewId` |
+| **状态变更类** | 玩家核心状态变化，影响多个界面 | **独立回调 + 事件广播** | `WeddingState`, `GuildId`, `TeamLeaderId`, `WeddingRoleId` |
+| **数据更新类** | 数值变化，只需刷新已打开界面 | **独立回调 + 按需刷新** | `WeddingAffectionPoints`, `GuildContribution`, `FriendIntimacy`, `MailUnreadCount` |
+
+#### 强制性架构约束（阻断性）
+
+```
+❌ 禁止：所有属性共用一个回调 + 全量刷新
+   问题：
+   - 性能差：多个属性同时变化时重复刷新
+   - 逻辑混乱：无法区分业务场景
+   - 漏掉主动弹窗：回调中只刷新界面，不弹窗
+
+✅ 必须：每个属性独立回调，或统一回调 + switch-case 分发
+   要求：
+   - 主动弹窗类属性 → 必须在回调中立即弹窗
+   - 状态变更类属性 → 必须广播事件通知所有相关界面
+   - 数据更新类属性 → 只刷新已打开的界面（不主动弹窗）
+```
+
+#### 代码模式（推荐）
+
+**方案 A：独立回调（性能最优，语义最清晰）**
+
+```csharp
+public override void OnInit() {
+    // 主动弹窗类属性（收到请求立即响应）
+    m_Player.AddPropertyCallback("XXXReceiveRequestRoleId", OnReceiveRequest);
+    m_Player.AddPropertyCallback("XXXApplyRoleId", OnReceiveApply);
+    
+    // 状态变更类属性（影响多个界面）
+    m_Player.AddPropertyCallback("XXXState", OnStateChanged);
+    m_Player.AddPropertyCallback("XXXRoleId", OnPartnerChanged);
+    
+    // 数据更新类属性（实时刷新）
+    m_Player.AddPropertyCallback("XXXPoints", OnPointsChanged);
+}
+
+// 主动弹窗类回调
+void OnReceiveRequest(ObjectID sender, int propertyIndex) {
+    long requesterId = m_Player.GetInt64(propertyIndex);
+    if (requesterId > 0) {
+        // 强制弹出确认界面
+        UIModule.S.OpenPanel(UIID.XXXRequestPanel, requesterId);
+    } else {
+        // 请求槽清空（超时/取消/对方离线）
+        // 关闭等待界面或显示提示
+    }
+}
+
+// 状态变更类回调
+void OnStateChanged(ObjectID sender, int propertyIndex) {
+    // 广播状态变更事件，所有相关界面监听并刷新
+    m_Kernel.CommandDynamic(CommandID.OnXXXStateChanged);
+}
+
+// 数据更新类回调
+void OnPointsChanged(ObjectID sender, int propertyIndex) {
+    // 只刷新已打开的界面
+    m_Kernel.CommandDynamic(CommandID.OnXXXPointsChanged);
+}
+```
+
+**方案 B：统一回调 + switch 分发（次优，但可接受）**
+
+```csharp
+void OnPropertyChanged(ObjectID sender, int propertyIndex) {
+    string propertyName = m_Player.GetPropertyName(propertyIndex);
+    
+    switch (propertyName) {
+        case "XXXReceiveRequestRoleId":
+            HandleReceiveRequest();
+            break;
+        case "XXXState":
+            HandleStateChanged();
+            break;
+        case "XXXPoints":
+            HandlePointsChanged();
+            break;
+    }
+}
+```
+
+#### 文档体现（强制要求）
+
+在 design-client.md 的"数据流与刷新机制"章节，必须明确：
+
+1. **列出所有监听的属性**（按类型分组：主动弹窗/状态变更/数据更新）
+2. **每个属性的回调处理逻辑**（弹窗/广播/刷新）
+3. **禁止使用"全量刷新"的模糊描述**
+
+**示例**：
+
+```markdown
+### 属性监听
+
+#### 主动弹窗类
+- `WeddingReceiveProposalRoleId` → `OnReceiveProposal`
+  - 触发时机：收到求婚请求（值 > 0）
+  - 处理逻辑：强制弹出 `MarriageProposeReceivePanel`，传入求婚者 RoleId
+  - 清空时机：求婚被接受/拒绝/超时（值 = 0）
+
+- `WeddingDivorceApplyRoleId` → `OnReceiveDivorceRequest`
+  - 触发时机：收到离婚申请（值 > 0）
+  - 处理逻辑：强制弹出 `MarriageDivorceConfirmPanel`
+
+#### 状态变更类
+- `WeddingState` → `OnMarriageStateChanged`
+  - 触发时机：订婚/结婚/离婚
+  - 处理逻辑：广播 `CommandID.OnMarriageStateChanged`，相关界面监听并刷新
+
+- `WeddingRoleId` → `OnSpouseChanged`
+  - 触发时机：结婚/离婚（配偶 ID 变化）
+  - 处理逻辑：刷新主界面页签（单身/已婚），刷新配偶信息
+
+#### 数据更新类
+- `WeddingAffectionPoints` → `OnAffectionChanged`
+  - 触发时机：亲密度变化
+  - 处理逻辑：若 `MarriageMarriedPage` 已打开，刷新亲密度进度条
+```
+
+#### 代码模板获取
+
+```
+CodeGraph 查询：AddPropertyCallback PropertyCallback Module
+CodeGraph 查询：GetPropertyName Player 属性
+```
+
+---
+
+### 1.4 协议解析起始索引规范（阻断性）
 
 **原始协议**（AddCustomHook 注册）：从索引 0 开始
 
@@ -162,7 +302,7 @@ public override void ParamArgs(IVarList args) {
 
 ---
 
-### 1.4 红点系统注册方式
+### 1.5 红点系统注册方式
 
 **注册方式选择**（框架约定）：
 
@@ -243,7 +383,7 @@ ELSE 协议实时下发即可
 ```
 
 **接入步骤**（固定流程，⚠️ 缺任何一步都会导致运行时数据为空，编译不会报错）：
-1. 修改 `D:\se\develop\public\table_config\outcode_config.json`
+1. 修改 `..\develop\public\table_config\outcode_config.json`
 2. 执行 `output_code_csharp.bat` 重新生成代码
 3. 实现 `TDXxxTableExtend.cs`（3 个方法：`InsertDynamicData`, `ParseComplete`, `ClearDynamicData`）
 4. 在 `DynamicConfigModule_Process.cs::InitProcessDic()` 中调用 `RegisterTable(...)`（表级注册，让 `DynamicConfigModule` 认得这张表的强类型解析方法）

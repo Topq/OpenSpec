@@ -597,7 +597,7 @@ artifacts:
       ### 4. [Client] 组（前端实现）
 
       **⚠️ 强制前置：先生成 4.0 前端架构设计章节，再生成具体任务（4.1 起）**
-      按 `rules/tasks/client-implementation.md`「一点五、前端架构设计强制要求」执行：先读客户端知识库 `D:\se\develop\client\project\.claude\skills\common\project_rag\index.md`（运营活动条目 → `business_activity_module.md` / `base_activity_page.md`），用其中的标准架构流程和数据流向图填 4.0 的 5 个小节。4.0 章节不得留空。
+      按 `rules/tasks/client-implementation.md`「一点五、前端架构设计强制要求」执行：先读客户端知识库 `..\develop\client\project\docs\ai-core\README.md`（knowledge 入口 → `knowledge/modules/index.md` 定位对应系统卡），用其中的模块分层与数据流链路填 4.0 的 5 个小节。4.0 章节不得留空。
 
       按 Panel/Page 划分子组
 
@@ -727,7 +727,7 @@ apply:
     **硬性约束速览**（详细规则见上方对应文件，此处仅提醒不可省略的检查点）：
     - 修改服务端 struct/record/枚举/协议前必须先读 develop/server/project/AGENTS.md，判断是否走 XML→生成器链路，禁止直接手改 define/ 下的生成产物。
     - 修改服务端 .cpp/.h 前必须先判断编码（file 命令），GBK 文件禁用 Edit 工具，改用 Python bytes 操作。
-    - 客户端任务开始前必须先读 develop/client/project/AGENTS.md 和 project_rag/index.md。
+    - 客户端任务开始前必须先读 develop/client/project/AGENTS.md 和 docs/ai-core/README.md（知识库入口）。
     - 配置表代码生成前后必须做 md5 快照比对，防止全量工具误改其他表。
 
     ---
@@ -767,7 +767,7 @@ apply:
 
     **输入**：
     - design.md 附录 A（客户端协议定义）和附录 B（服务端协议定义）
-    - `D:\se\develop\server\project\AGENTS.md` 及其路由的 `$lr-generated-code-workflow`
+    - `..\develop\server\project\AGENTS.md` 及其路由的 `$lr-generated-code-workflow`
 
     **执行逻辑**：
     1. **协议号分配**（必须走生成器链路，不是自动/手动分配数字）

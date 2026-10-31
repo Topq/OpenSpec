@@ -1,0 +1,18 @@
+# Reproducible dependencies, caches, and demo build output.
+node_modules/
+__pycache__/
+*.py[cod]
+/changes/**/demo/dist/
+
+# Keep final archived changes; active drafts stay local.
+/changes/*
+!/changes/archive/
+
+# Local editor, assistant, and MCP connection settings.
+/.idea/
+/.workbuddy/
+/.codex/config.toml
+
+# Generated table exports and inspection output.
+/outputs/monthcard-20260804/
+/outputs/MonthCardGiftPanel_hierarchy.txt

@@ -21,7 +21,7 @@
 | **Record 表是否已定义** | `#define <TABLE_NAME>_REC` | 判断是扩展还是新建 |
 | **协议是否已定义** | `CLIENT_CUSTOMMSG_<KEYWORD>` | 判断是复用还是新建 |
 
-**项目路径**: `D:/se/develop/server/project`
+**项目路径**: `../develop/server/project`
 
 ### 调查结果的文档体现
 

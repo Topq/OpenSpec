@@ -1,0 +1,25 @@
+{
+  "semanticId": "text.localized-title",
+  "componentType": "UnityEngine.GameObject",
+  "description": "多语言文本组件（标题样式）。",
+  "components": [
+    {
+      "type": "TMPro.TextMeshProUGUI",
+      "properties": {
+        "font": "Assets/Resources/Font/fzhjtSDF.asset",
+        "fontSharedMaterial": "Assets/Resources/Font/fzhjtSDF_UI_TitleLine.mat",
+        "fontSize": 32,
+        "color": "#FFD700",
+        "alignment": "Center"
+      }
+    },
+    {
+      "type": "LR.Localizer",
+      "properties": {}
+    }
+  ],
+  "hierarchy": [],
+  "notes": [
+    "标题样式：金色、32 号字、居中对齐、带标题线描边材质"
+  ]
+}

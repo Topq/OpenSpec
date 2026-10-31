@@ -1,0 +1,17 @@
+{
+  "semanticId": "template.tab-item",
+  "componentType": "UnityEngine.GameObject",
+  "description": "标签页项模板。包含背景、图标、文本的标准标签页按钮布局。",
+  "components": [],
+  "hierarchy": [],
+  "postProcess": "tab-item",
+  "notes": [
+    "标准标签页按钮布局：",
+    "  - Button：可点击的标签按钮",
+    "  - Image：背景图（选中/未选中状态）",
+    "  - Icon：标签图标（可选）",
+    "  - Label：标签文本",
+    "通常用于多页签切换场景",
+    "postProcess='tab-item' 钩子负责创建完整层级"
+  ]
+}

@@ -12,7 +12,7 @@
 
 **文件路径**（绝对路径，固定）：
 ```
-D:\se\develop\client\project\AGENTS.md
+..\develop\client\project\AGENTS.md
 ```
 
 **读取后处理**：
@@ -28,32 +28,39 @@ D:\se\develop\client\project\AGENTS.md
 
 **⚠️ 强制前置步骤：做任何客户端实现前，先查知识库索引**
 
-在开始编写任何客户端代码前，**必须先读取项目知识库索引**，确认是否有相关文档：
+在开始编写任何客户端代码前，**必须先读取项目知识库入口**，确认是否有相关文档：
 
 ```bash
-Read D:\se\develop\client\project\.claude\skills\common\project_rag\index.md
+Read ..\develop\client\project\docs\ai-core\README.md
 ```
 
-**根据任务类型，快速定位相关条目**（不用全读，重点看对应章节）：
+**知识库结构**（ai-core 按记忆类型分三目录，先入口后索引，不递归泛读）：
 
-| 任务类型 | 重点查看的索引条目 | 对应文档路径 |
-|---------|------------------|-------------|
-| 生成 Module 骨架 | 第 10 条（LogicModule）<br>第 11 条（运营活动）| `reference/module.md`<br>`reference/module/activity.md` |
-| 实现 UI 脚本 | 第 5 条（UI）<br>第 7 条（多语言）| `reference/ui.md`<br>`reference/multilanguage.md` |
-| 访问配置表 | 第 4 条（配表）| `reference/table.md` |
-| 时间显示/格式化 | 第 8 条（DateFormatHelper）| `reference/com/dateformathelper.md` |
-| 解析参数字符串 | 第 9 条（ParamReader）| `reference/com/paramreader.md` |
-| 本地配置存储 | 第 12 条（LocalPlayerConfig）| `reference/com/localplayerconfig.md` |
-| 其他任务 | 用 Grep 在 index.md 里搜索关键词 | - |
+| 目录 | 职责 |
+|------|------|
+| `knowledge/` | 长期知识：模块/系统知识卡（唯一入口 `knowledge/core-index.md`） |
+| `workflows/` | 过程流程：开发、排查、验证、提交（如 `unity-compile-verification.md`） |
+| `rules/` | 硬规则：编码规范 `rules/coding_standards/`、硬门禁 `rules/gates/` |
+
+**根据任务类型，快速定位相关知识卡**（不用全读，重点看命中条目）：
+
+| 任务类型 | 路由 | 对应文档路径（相对 `docs/ai-core/`） |
+|---------|------|-----------------------------------|
+| 生成 Module 骨架 | knowledge 索引 → 对应系统卡 | `knowledge/core-index.md` → `knowledge/modules/index.md`（如 `activity-system.md`、`red-blue-point-system.md`） |
+| 实现 UI 脚本 | knowledge 索引 → UI 系统卡 | `knowledge/modules/index.md` → `knowledge/modules/ui-management-system.md`（UIModule/UIDataTable/Panel 生命周期） |
+| 访问配置表 | knowledge 索引 → 表系统卡 | `knowledge/modules/table-loading-system.md` |
+| 红点接入 | knowledge 索引 → 红点系统卡 | `knowledge/modules/red-blue-point-system.md` |
+| 编码规范 | rules | `rules/coding_standards/README.md`（见本文 §5） |
+| 其他任务 | 用 Grep 在 `knowledge/core-index.md`、`knowledge/modules/index.md` 里搜索关键词 | - |
 
 **执行流程（知识库优先原则）**：
 
-1. **找到相关文档** → Read 详细文档 → 确认参考模块/参考代码
+1. **找到相关知识卡** → Read 详细文档 → 确认参考模块/参考代码
 2. **用 CodeGraph 查询** → 查询标准签名、调用模式（如 `query "method OnInit in MultiSevenDayLoginModule signature"`）
 3. **Read 参考代码** → 读取完整实现，理解上下文和"为什么这样写"
 4. **复制标准模板** → 不要凭直觉编写
 
-**如果 index.md 里没有相关条目**：
+**如果知识卡索引里没有相关条目**（ai-core 口径：模块存在性/粗定位本就不进知识库，直接查源码）：
 - 用 CodeGraph 搜索类似功能的实现（如 `query "class implements ILogicModule in path:ActivityModule"`）
 - 或用 Grep 搜索关键词（如 `grep -rn "RegisterRecLateHook" --include=*.cs`）
 - 读取至少 2 个参考文件，理解项目规范后再动手
@@ -204,15 +211,18 @@ find /d/se/develop/client/project/Assets/Script/LogicModule/ActivityModule -maxd
 
 **生成客户端 C# 代码前，必须阅读并遵守项目编码规范：**
 
-规范文件目录（相对于客户端工程根目录）：
+规范入口（相对于客户端工程根目录）：
 ```
-.claude/skills/common/csharp_code/
+docs/ai-core/rules/coding_standards/README.md
 ```
 
-**必读文件清单：**
-- `csharp_spec.md` — 33 条具体命名/格式/结构规则（如 `m_` 前缀、类内成员排列顺序、数据结构类的公有变量原则等）
+**必读文件清单**（相对 `docs/ai-core/rules/coding_standards/`，以各原文件为准）：
+- `csharp_spec.md` — 基础编码规范（如 `m_` 前缀、类内成员排列顺序、数据结构类的公有变量原则等）
+- `csharp_safe.md` — 保护规范（如判空、越界、生命周期管理）
 - `csharp_gc.md` — GC 优化规则（如避免 foreach 装箱、慎用 LINQ、字符串拼接用 StringBuilder 等）
-- `csharp_safe.md` — 安全编码规则（如判空、生命周期管理、避免野指针等）
+- `csharp_comment.md` — 注释规范（尤其 UI 面板 `OnOpen` 参数注释）
+- `csharp_self.md` — 个人代码风格（参数命名、partial 拆分、模块门面、Define 等）
+- 通用 UI/逻辑要求见 `csharp_func_dev.md`
 
 **关键规则摘要（详细规则以原文件为准）：**
 1. **命名约定**：

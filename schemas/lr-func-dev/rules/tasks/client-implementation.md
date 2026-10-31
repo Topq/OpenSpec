@@ -10,15 +10,18 @@
 
 **生成客户端 C# 代码前，必须阅读并遵守项目编码规范：**
 
-规范文件目录（相对于客户端工程根目录）：
+规范入口（相对于客户端工程根目录）：
 ```
-.claude/skills/common/csharp_code/
+docs/ai-core/rules/coding_standards/README.md
 ```
 
-**必读文件清单：**
-- `csharp_spec.md` — 33 条具体命名/格式/结构规则（如 `m_` 前缀、类内成员排列顺序、数据结构类的公有变量原则等）
+**必读文件清单**（相对 `docs/ai-core/rules/coding_standards/`，以各原文件为准）：
+- `csharp_spec.md` — 基础编码规范（如 `m_` 前缀、类内成员排列顺序、数据结构类的公有变量原则等）
+- `csharp_safe.md` — 保护规范（如判空、越界、生命周期管理）
 - `csharp_gc.md` — GC 优化规则（如避免 foreach 装箱、慎用 LINQ、字符串拼接用 StringBuilder 等）
-- `csharp_safe.md` — 安全编码规则（如判空、生命周期管理、避免野指针等）
+- `csharp_comment.md` — 注释规范（尤其 UI 面板 `OnOpen` 参数注释）
+- `csharp_self.md` — 个人代码风格（参数命名、partial 拆分、模块门面、Define 等）
+- 通用 UI/逻辑要求见 `csharp_func_dev.md`
 
 **关键规则摘要（详细规则以原文件为准）：**
 1. **命名约定**：
@@ -72,7 +75,7 @@
 ### 配置表代码生成流程
 
 **步骤 1：注册配置表名**
-- 文件：`D:\se\develop\client\tools\table\table_config\outcode_config.json`
+- 文件：`..\develop\client\tools\table\table_config\outcode_config.json`
 - 在 `need_copy` 数组中添加表名（不含 `.txt` 后缀，小写+下划线格式）
 - 示例：`"active_fund_main"`, `"activity_mix_growthfund_reward"`
 
@@ -84,7 +87,7 @@
   - 有任何字段标记为 C 或 A → 不需要添加
 
 **步骤 3：生成代码**
-- 双击运行 `D:\se\develop\client\tools\table\output_code_csharp.bat`
+- 双击运行 `..\develop\client\tools\table\output_code_csharp.bat`
 - 自动生成 4 个文件：
   - `Assets/Script/Table/Generate/Activity/{TableName}/TD{TableName}.cs` （数据类）
   - `Assets/Script/Table/Generate/Activity/{TableName}/TD{TableName}Table.cs` （表管理类）
@@ -129,7 +132,7 @@
 ### UI 注册流程
 
 **步骤 1：添加 UIID 枚举**
-- 文件：`D:\se\develop\client\project\Assets\Script\Table\Data\Define\UIDefine.cs`
+- 文件：`..\develop\client\project\Assets\Script\Table\Data\Define\UIDefine.cs`
 - 在 `enum UIID` 中添加新的 UI ID（按功能模块分组，插入到相似 UI 附近）
 - 命名规则：UI 类名去掉 `.cs` 后缀，保持大小写一致
 - 示例：
@@ -143,7 +146,7 @@
   ```
 
 **步骤 2：注册 UI 到 UIDataTable**
-- 文件：`D:\se\develop\client\project\Assets\Script\LogicModule\UIModule\Data\UIDataTable.cs`
+- 文件：`..\develop\client\project\Assets\Script\LogicModule\UIModule\Data\UIDataTable.cs`
 - 在 `InitUIDataTable()` 方法中添加 `AddPanelData` 调用（按功能模块分组，插入到相似 UI 附近）
 - API 格式：
   ```csharp
@@ -185,20 +188,20 @@
 
 ### 1.5.2 架构设计的知识来源（强制：知识库优先，不新写文档）
 
-**本项目不维护独立的客户端架构知识库**，架构设计的依据来自客户端工程自己的知识库索引：
+**本项目不维护独立的客户端架构知识库**，架构设计的依据来自客户端工程自己的知识库：
 
 ```
-D:\se\develop\client\project\.claude\skills\common\project_rag\index.md
+..\develop\client\project\docs\ai-core\README.md
 ```
 
 **生成 4.0 章节前的强制步骤**：
-1. 读取 `index.md`，定位第 11 条"运营活动"（若功能属于其他类型，按 index.md 里的其他条目定位）
-2. 读取 `reference/module/activity.md` 找到对应子活动条目
-3. 读取 `reference/module/activity/business_activity_module.md`（框架层：红点/可见性/跳转/参数系统，第十一节"新增活动的标准流程"）
-4. 读取 `reference/ui/base_activity_page.md`（UI 三层结构：Panel/Page/MenuCell，第二节有完整数据流向图，第九节"新增活动UI的标准流程"）
-5. 用这两份文档里的标准流程和数据流向图，填 4.0 的 5 个小节
+1. 读取 `docs/ai-core/README.md` 入口，按任务进入 `knowledge/core-index.md`
+2. 按 `knowledge/modules/index.md` 定位对应系统卡（活动类功能 → `activity-system.md`；纯面板展示 → `ui-management-system.md`；涉及配置表加载 → `table-loading-system.md`）
+3. Read 命中的系统卡，取其中的模块分层、数据流和刷新链路作为架构依据
+4. 编码规范另按本文 §0 读 `rules/coding_standards/README.md`
+5. 用知识卡 + design.md 附录 A 的现场调查结论，填 4.0 的 5 个小节
 
-**如果 index.md 没有覆盖到的功能类型**（不是标准活动模式，如需要独立物理模拟的玩法）：
+**如果 modules/index.md 没有覆盖到的功能类型**（不是标准活动模式，如需要独立物理模拟的玩法）：
 - 允许用 CodeGraph 查询代码现场分析架构（如 `codegraph explore "MarblePlinkoModule MarblePlinkoPage OnUpdateTime"`）
 - 在 4.0.4 决策表里注明"知识库未覆盖，参考 XXX 模块现场分析"
 
@@ -412,7 +415,7 @@ TDGrowthFundTable.metaData,
 ```markdown
 ### 任务 X：运行 output_code_csharp.bat 生成配置表代码
 
-**目标路径**: D:/se/develop/client/tools/table/
+**目标路径**: ../develop/client/tools/table/
 
 **依赖**: 任务 Y（outcode_config.json 已添加表名）
 
@@ -543,13 +546,13 @@ void SetData(string rewardStr, CellClaimState state, System.Action onClaim)
    ```
 
 2. **根据 design/config.md 的建议修改 outcode_config.json**：
-   - 文件位置：`D:\se\develop\client\tools\table\table_config\outcode_config.json`
+   - 文件位置：`..\develop\client\tools\table\table_config\outcode_config.json`
    - 如果包含 C 或 A 字段 → 添加到 `need_copy` 数组
    - 如果是动态活动配置 → 添加到 `NeedParseDataMethod` 数组
 
 3. **生成代码**：
    ```bash
-   cd D:\se\develop\client\tools\table
+   cd ..\develop\client\tools\table
    双击 output_code_csharp.bat
    ```
 

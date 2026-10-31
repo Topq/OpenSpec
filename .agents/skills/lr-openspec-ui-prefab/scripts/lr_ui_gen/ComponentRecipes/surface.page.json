@@ -1,0 +1,13 @@
+{
+  "semanticId": "surface.page",
+  "componentType": "UnityEngine.GameObject",
+  "description": "面板内页面根节点。保留 DOM 子层级，不附加额外组件。",
+  "components": [],
+  "hierarchy": [],
+  "notes": [
+    "surface.page 用于面板内的页面容器",
+    "与 surface.panel 类似，仅包含 RectTransform",
+    "主要用于组织层级结构，不影响渲染",
+    "通常作为多页面切换的容器"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "semanticId": "surface.modal",
+  "componentType": "UnityEngine.GameObject",
+  "description": "模态弹窗根节点。包含半透明遮罩层、弹窗容器和阻断点击区域。",
+  "components": [],
+  "hierarchy": [],
+  "postProcess": "modal",
+  "notes": [
+    "Mask 层：全屏半透明黑色遮罩（#00000080），带 Button 组件用于点击关闭",
+    "Container 层：弹窗内容容器，默认居中 600x400，白色背景",
+    "实际内容应作为 Container 的子节点添加",
+    "Button 的点击事件需要在运行时绑定关闭逻辑",
+    "postProcess='modal' 钩子负责创建完整层级"
+  ]
+}

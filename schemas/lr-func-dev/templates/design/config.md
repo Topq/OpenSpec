@@ -97,7 +97,7 @@ ActiveId | Name      | RewardList
 
 ### 客户端代码生成配置（强制）
 
-**outcode_config.json 配置建议**（配置文件位置：`D:\se\develop\client\tools\table\table_config\outcode_config.json`）
+**outcode_config.json 配置建议**（配置文件位置：`..\develop\client\tools\table\table_config\outcode_config.json`）
 
 **1. need_copy 配置**（判断依据：字段定义表的"属性"列）
 - 存在任何 C 或 A 字段 → 需要添加到 `need_copy`

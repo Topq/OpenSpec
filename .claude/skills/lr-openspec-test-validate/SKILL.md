@@ -101,7 +101,7 @@ Read(changes/{change-id}/implementation-report.md)
 **验证方法**：
 ```bash
 codegraph_explore("OnClickClaim HasClaimed 领取按钮 GrowthFundPage", 
-                  projectPath: "D:/se/develop/client/project")
+                  projectPath: "../develop/client/project")
 ```
 
 **查询目标**：
@@ -119,7 +119,7 @@ codegraph_explore("OnClickClaim HasClaimed 领取按钮 GrowthFundPage",
 **验证方法**：
 ```bash
 codegraph_explore("OnClickClaim CheckBagFull ItemBaseModule GrowthFundPage", 
-                  projectPath: "D:/se/develop/client/project")
+                  projectPath: "../develop/client/project")
 ```
 
 **查询目标**：

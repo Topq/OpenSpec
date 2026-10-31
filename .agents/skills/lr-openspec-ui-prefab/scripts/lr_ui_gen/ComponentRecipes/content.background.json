@@ -1,0 +1,21 @@
+{
+  "semanticId": "content.background",
+  "componentType": "UnityEngine.GameObject",
+  "description": "背景图组件。用于面板、弹窗等容器的背景装饰。",
+  "components": [
+    {
+      "type": "UnityEngine.UI.Image",
+      "properties": {
+        "sprite": "Assets/UI/AtlasResources/CommonPanel/ty_tk_frame_07.png",
+        "type": "Sliced",
+        "raycastTarget": false
+      }
+    }
+  ],
+  "hierarchy": [],
+  "notes": [
+    "默认背景图: ty_tk_frame_07.png",
+    "type=Sliced 支持九宫格拉伸",
+    "raycastTarget=false 不响应点击事件（纯装饰）"
+  ]
+}

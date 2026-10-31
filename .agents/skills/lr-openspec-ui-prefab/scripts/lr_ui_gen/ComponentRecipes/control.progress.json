@@ -1,0 +1,67 @@
+{
+  "semanticId": "control.progress",
+  "componentType": "LR.LRProgressBar",
+  "description": "进度条组件。单段进度条，前景 Fill 节点必须，背景 Bg 节点可选。",
+  "scanSource": "基于 2026-07-27 扫描 Assets/Resources/PanelUI 的 770 个 Prefab，178 个 LRProgressBar 实例，Rank 1 配方（15 实例，8.4%）。",
+  "hierarchy": [
+    {
+      "nodeName": "Bg",
+      "isRequired": false,
+      "components": [
+        {
+          "type": "UnityEngine.UI.Image",
+          "properties": {
+            "raycastTarget": false,
+            "color": "#FFFFFF",
+            "sprite": "Assets/UI/AtlasResources/CommonUI/bg2x2.png"
+          }
+        }
+      ],
+      "bindToField": "m_BgNode",
+      "layoutDefaults": {
+        "anchorMin": [0, 0],
+        "anchorMax": [1, 1],
+        "sizeDelta": [0, 0],
+        "pivot": [0.5, 0.5]
+      }
+    },
+    {
+      "nodeName": "Fill",
+      "isRequired": true,
+      "components": [
+        {
+          "type": "UnityEngine.UI.Image",
+          "properties": {
+            "type": "Filled",
+            "fillMethod": "Horizontal",
+            "fillOrigin": "Left",
+            "fillAmount": 1.0,
+            "raycastTarget": false,
+            "color": "#FFFFFF",
+            "sprite": "Assets/UI/AtlasResources/BossChallengePanel/myzt_line_3.png"
+          }
+        }
+      ],
+      "bindToField": "m_TargetImages[0]",
+      "layoutDefaults": {
+        "anchorMin": [0, 0],
+        "anchorMax": [1, 1],
+        "sizeDelta": [0, 0],
+        "pivot": [0.5, 0.5]
+      }
+    }
+  ],
+  "defaultValues": {
+    "m_Progress": 0.0,
+    "m_Widths": [120.0],
+    "m_IsPrograssOri": false
+  },
+  "notes": [
+    "Fill 默认贴图 myzt_line_3.png：进度条本身高度业务化，无压倒性通用素材（Top1 仅 24/178 次），此处选用出现频率最高的样例作为占位图，方便测试人员在正式美术资源到位前看到非空进度条效果；正式接入时应替换为具体活动/面板专属图。",
+    "Bg 默认贴图 bg2x2.png：CommonUI 通用色块图，作为轨道背景占位，同样在正式接入时替换。",
+    "所有扫描到的进度条实例都是单段（m_TargetImages 数组长度 = 1），分段进度条不是项目常见模式。",
+    "前景节点命名在现有 Prefab 中不统一（Bar/Progress/Fill），新配方统一为 Fill 对齐 Unity Image.Filled 语义。",
+    "背景节点可选：Rank 1 有独立 Bg 子节点（15 实例），Rank 2 m_BgNode 指向自己（15 实例）。",
+    "默认宽度在不同实例中有 90/120/125 三种，新配方取中间值 120。"
+  ]
+}

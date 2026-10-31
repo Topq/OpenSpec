@@ -18,7 +18,7 @@ namespace LRUIPrefabGen
         // Global default text style (unity-ui-components.md "全局默认样式").
         const string DefaultFont = "Assets/Resources/Font/fzhjtSDF.asset";
 
-        public static void Apply(GameObject go, string componentId, JObject node)
+        public static void Apply(GameObject go, string componentId, JObject node, bool isRoot = false)
         {
             // 处理样式变体（如 text.localized 的 title/body 样式）
             // 注意：JSON 布局节点里的键名是 "textStyle"（tsx_to_json.py 把 TSX 的
@@ -39,7 +39,7 @@ namespace LRUIPrefabGen
             var recipe = ComponentRecipeLoader.Get(semanticId);
             if (recipe != null)
             {
-                ApplyFromRecipe(go, recipe, node);
+                ApplyFromRecipe(go, recipe, node, isRoot);
                 return;
             }
 
@@ -81,6 +81,44 @@ namespace LRUIPrefabGen
             }
         }
 
+        /// <summary>
+        /// 反射挂载组件，并补齐依赖组件。
+        ///
+        /// 必须走这个方法而不是直接 go.AddComponent(type)，有两类依赖要补：
+        ///
+        /// 1. [RequireComponent] 声明的依赖。Unity 只在编辑器里通过菜单/Inspector 添加
+        ///    组件时才自动补，用反射 AddComponent(Type) 不会触发。
+        ///
+        /// 2. Graphic 子类需要的 CanvasRenderer。注意 Graphic 上只有
+        ///    [RequireComponent(typeof(RectTransform))]，并没有声明 CanvasRenderer——
+        ///    那是编辑器 GraphicEditor 添加组件时补的，所以第 1 条覆盖不到，必须显式判断。
+        ///    缺了 CanvasRenderer 运行时会在 RectMask2D.PerformClipping 里抛
+        ///    MissingComponentException（"There is no 'CanvasRenderer' attached to ..."），
+        ///    而且只有 ScrollView 裁剪到该节点时才炸，生成期完全看不出来。
+        ///    工程现状印证了这个约定：真实 Prefab 里 RaycastArea 带 CanvasRenderer 的 865 个，
+        ///    不带的只有 15 个。
+        /// </summary>
+        static Component AddComponentWithRequirements(GameObject go, Type type)
+        {
+            foreach (RequireComponent req in type.GetCustomAttributes(typeof(RequireComponent), true))
+            {
+                foreach (Type dep in new[] { req.m_Type0, req.m_Type1, req.m_Type2 })
+                {
+                    if (dep != null && go.GetComponent(dep) == null)
+                    {
+                        go.AddComponent(dep);
+                    }
+                }
+            }
+
+            if (typeof(Graphic).IsAssignableFrom(type) && go.GetComponent<CanvasRenderer>() == null)
+            {
+                go.AddComponent<CanvasRenderer>();
+            }
+
+            return go.AddComponent(type);
+        }
+
         static void AddLRComponent(GameObject go, string fullTypeName)
         {
             Type type = FindType(fullTypeName);
@@ -91,7 +129,7 @@ namespace LRUIPrefabGen
             }
             if (go.GetComponent(type) == null)
             {
-                go.AddComponent(type);
+                AddComponentWithRequirements(go, type);
             }
         }
 
@@ -148,7 +186,7 @@ namespace LRUIPrefabGen
         /// <summary>
         /// 从 JSON 配方应用组件配置（新架构）
         /// </summary>
-        static void ApplyFromRecipe(GameObject go, ComponentRecipe recipe, JObject node)
+        static void ApplyFromRecipe(GameObject go, ComponentRecipe recipe, JObject node, bool isRoot)
         {
             // 1. 挂载主组件
             Type componentType = FindType(recipe.componentType);
@@ -164,15 +202,26 @@ namespace LRUIPrefabGen
                 mainComponent = go.GetComponent(componentType);
                 if (mainComponent == null)
                 {
-                    mainComponent = go.AddComponent(componentType);
+                    mainComponent = AddComponentWithRequirements(go, componentType);
                 }
             }
 
             // 1.5. 挂载根节点额外组件（如 AsyncTexture）
+            // **重要修复**：surface.panel 的 Canvas/GraphicRaycaster/Animator 只应在根节点添加
             if (recipe.components != null)
             {
                 foreach (var compSpec in recipe.components)
                 {
+                    // 如果是 surface.panel 配方且不是根节点，跳过 Canvas/GraphicRaycaster/Animator
+                    if (recipe.semanticId == "surface.panel" && !isRoot
+                        && (compSpec.type == "UnityEngine.Canvas"
+                            || compSpec.type == "UnityEngine.UI.GraphicRaycaster"
+                            || compSpec.type == "UnityEngine.Animator"))
+                    {
+                        Debug.Log($"[ComponentRecipes] 跳过非根节点的 {compSpec.type} 组件: {go.name}");
+                        continue;
+                    }
+
                     Type compType = FindType(compSpec.type);
                     if (compType == null)
                     {
@@ -180,7 +229,7 @@ namespace LRUIPrefabGen
                         continue;
                     }
 
-                    Component comp = go.AddComponent(compType);
+                    Component comp = AddComponentWithRequirements(go, compType);
 
                     // 应用组件属性
                     if (compSpec.properties != null)
@@ -233,7 +282,7 @@ namespace LRUIPrefabGen
                                 continue;
                             }
 
-                            Component comp = childGo.AddComponent(compType);
+                            Component comp = AddComponentWithRequirements(childGo, compType);
 
                             // 应用组件属性
                             if (compSpec.properties != null)
@@ -553,7 +602,7 @@ namespace LRUIPrefabGen
 
             if (singleScrollViewType != null && typeof(ScrollRect).IsAssignableFrom(singleScrollViewType))
             {
-                scrollRect = (ScrollRect)go.AddComponent(singleScrollViewType);
+                scrollRect = (ScrollRect)AddComponentWithRequirements(go, singleScrollViewType);
             }
             else
             {
@@ -664,7 +713,12 @@ namespace LRUIPrefabGen
             placeholderRect.sizeDelta = Vector2.zero;
 
             var placeholderTmp = placeholder.AddComponent<TextMeshProUGUI>();
+            // 优先读 node["placeholder"]，否则回退到 node["text"]（TSX 的 data-text 用作占位符提示）
             string placeholderText = (string)node?["placeholder"];
+            if (string.IsNullOrEmpty(placeholderText))
+            {
+                placeholderText = (string)node?["text"];
+            }
             placeholderTmp.text = string.IsNullOrEmpty(placeholderText) ? "请输入..." : placeholderText;
             placeholderTmp.fontSize = 20f;
             placeholderTmp.color = new Color(0.67f, 0.67f, 0.67f, 1f); // #AAAAAA
@@ -943,7 +997,7 @@ namespace LRUIPrefabGen
 
             if (scrollViewType != null && typeof(ScrollRect).IsAssignableFrom(scrollViewType))
             {
-                scrollRect = (ScrollRect)go.AddComponent(scrollViewType);
+                scrollRect = (ScrollRect)AddComponentWithRequirements(go, scrollViewType);
             }
             else
             {
@@ -968,7 +1022,11 @@ namespace LRUIPrefabGen
             var viewportMask = viewport.AddComponent<RectMask2D>();
             scrollRect.viewport = viewportRect;
 
-            // 3. 创建 Content（网格布局容器）
+            // 3. 创建 Content（内容容器）
+            // 不加 GridLayoutGroup：LR.ScrollView 自己算行列（OnRefreshSize 用
+            // m_CellWidth/m_CellHeight 求 m_ColCount，OnGetPos 直接写 anchoredPosition），
+            // 挂 LayoutGroup 会和它抢位置。项目里 400 个用 LR.ScrollView 的 Prefab
+            // 没有一个在 Content 上挂 GridLayoutGroup。
             GameObject content = new GameObject("Content", typeof(RectTransform));
             content.transform.SetParent(viewport.transform, false);
             var contentRect = content.GetComponent<RectTransform>();
@@ -976,15 +1034,6 @@ namespace LRUIPrefabGen
             contentRect.anchorMax = new Vector2(1f, 1f);
             contentRect.sizeDelta = new Vector2(0f, 600f); // 默认高度
             contentRect.pivot = new Vector2(0.5f, 1f);
-
-            // 添加 GridLayoutGroup
-            var gridLayout = content.AddComponent<GridLayoutGroup>();
-            gridLayout.cellSize = new Vector2(150f, 150f);
-            gridLayout.spacing = new Vector2(10f, 10f);
-            gridLayout.startCorner = GridLayoutGroup.Corner.UpperLeft;
-            gridLayout.startAxis = GridLayoutGroup.Axis.Horizontal;
-            gridLayout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
-            gridLayout.constraintCount = 4;
 
             scrollRect.content = contentRect;
 

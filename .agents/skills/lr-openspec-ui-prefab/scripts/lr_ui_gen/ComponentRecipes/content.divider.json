@@ -1,0 +1,19 @@
+{
+  "semanticId": "content.divider",
+  "componentType": "UnityEngine.GameObject",
+  "description": "分割线组件。用于视觉分隔不同区域或内容块。",
+  "components": [
+    {
+      "type": "UnityEngine.UI.Image",
+      "properties": {
+        "sprite": "Assets/UI/AtlasResources/CommonUI/ty_line_fgx02.png",
+        "raycastTarget": false
+      }
+    }
+  ],
+  "hierarchy": [],
+  "notes": [
+    "默认分割线图片: ty_line_fgx02.png",
+    "raycastTarget=false 不响应点击事件（纯装饰）"
+  ]
+}

@@ -10,7 +10,7 @@
 
 ### 1.1 前置条件
 
-- Unity Editor 已启动（项目路径：`D:\se\develop\client\project`）
+- Unity Editor 已启动（项目路径：`..\develop\client\project`）
 - ai-game-developer MCP 插件已连接（http://localhost:22992）
 - 检查方法：调用 `mcp__ai-game-developer__editor-application-get-state`，确认能获取响应
 
@@ -262,14 +262,135 @@ python -c "print(open('<file>', 'rb').read().count(b'\xef\xbf\xbd'))"
 
 ---
 
-## 4. 调用方集成指南
+## 4. 孤儿产物检查（apply 阶段必检）
 
-### 4.1 apply 阶段（lr-openspec-apply）
+### 4.1 什么是孤儿产物
+
+**定义**：已生成、能编译通过，但运行时不起作用的代码产物。
+
+**典型案例**：
+- 配置表 `.cs` 生成了，但没在 `TableConfig.cs` 注册 → 运行时不加载，所有查询取空
+- `CommandID.OnXxx` 有监听方但无发送方 → 事件永远不会触发
+- `UIID.XxxPanel` 注册了但无调用方 → 界面永远打不开
+- `RegisterPropHook` 注册了 hook 但无属性挂载 → 回调永远不会被调用
+
+**为什么编译抓不到**：编译只检查"引用了不存在的东西"，孤儿产物是反向的"存在但没人引用"。
+
+---
+
+### 4.2 检查时机
+
+**apply 阶段 6.4 编译门禁后立即执行**，与编译验证并列（不是替代）：
+
+```
+[Client] 任务完成 → 增量编译验证（本文件第 1/2 节）→ 孤儿检查（本节）→ 勾选 checkbox
+[Server] 任务完成 → 服务端编译验证（本文件第 3 节）→ 孤儿检查（本节）→ 勾选 checkbox
+```
+
+**为什么不能跳过**：Integration 阶段（TC-xxx 人工验证）能发现孤儿产物，但那是最慢最贵的关卡。在 apply 阶段机械检查，成本几乎为零。
+
+---
+
+### 4.3 执行命令
+
+**脚本路径**：`schemas/lr-func-dev/rules/common/orphan-check.py`
+
+**推荐用法（apply 阶段）**：
+```bash
+python orphan-check.py --change <change-id>
+# 示例：检查 marriage-func 变更的产物
+python orphan-check.py --change marriage-func
+```
+
+**工作原理**：
+- 从 `changes/<change-id>/tasks.md` 和 `design.md` 提取产物清单（配置表/UI/CommandID/模块）
+- 只检查清单里声明的产物是否生成 + 注册 + 接线
+- 能检出"声明但未生成"（如 `TDWeddingSkillTable` tasks 里写了但没导表）
+
+**CI/CR 阶段用法（待实现）**：
+```bash
+python orphan-check.py --diff origin/main...HEAD
+```
+
+---
+
+### 4.4 检查项清单
+
+| 检查项 | 孤儿模式 | 处理 |
+|-------|---------|------|
+| **配置表注册** | `Generate/**/TD*Table.cs` 已生成但未在 `TableConfig.cs` 注册 | 补注册到 `delayLoadTableArray` |
+| **UI 面板接线** | `UIDefine.cs` 定义 `UIID.XxxPanel` 但未在 `UIDataTable.cs` 注册 | 补 `AddPanelData` 注册 |
+| | `UIDataTable.cs` 已注册但无任何 `OpenPanel` 调用方 | 核查是否通过父 Panel 间接打开（Page 合法），否则补调用方 |
+| **CommandID 事件接线** | 有监听方（`AddDynamicCommand`）但无发送方（`CommandDynamic`） | 补发送方，或确认从 Lua 发送 |
+| | 有发送方但无监听方 | 补监听方，或确认为内部通知无需外部监听 |
+| **属性监听 Hook** | `RegisterPropHook` 注册了 hook 名但无任何 `AddPropHook` 挂载 | 补属性挂载，或删除无用 hook |
+
+---
+
+### 4.5 输出解读
+
+**退出码**：
+- `0` = 未发现孤儿
+- `1` = 发现孤儿（警告列表输出到 stdout）
+- `2` = 脚本执行错误
+
+**警告格式**：
+```
+TABLE: TDWeddingConditionTable 已生成但未在 TableConfig.cs 注册（运行时不会加载）
+UI: UIID.MarriageProposeReceivePanel 已注册但无任何 OpenPanel 调用方（可能是孤儿）
+CMD: CommandID.OnMarriageAffectionChanged 有 1 个监听方但无任何发送方
+HOOK: "MarriageModule:OnWeddingPropertyChanged" 在 MarriageModule.cs 中注册但无任何属性挂载
+```
+
+**合法例外（不需要修复）**：
+- UI Page 通过父 Panel 的页签切换打开，不是 `OpenPanel` 直接调用
+- CommandID 从 Lua 发送（如 `OnLuaXxx`）
+- CommandID 为协议回包内部通知，不需要外部监听方
+- 编辑器专用表（如 `TDGmListTable`，只在 `#if UNITY_EDITOR` 中注册）
+
+**处理建议**：
+- 警告数 = 0 → 通过，继续
+- 警告数 > 0 → 人工核查每条警告，确认是否为合法例外
+  - 合法例外 → 在 implementation-report.md 注明"已核查，为合法例外"
+  - 真孤儿 → 立即修复（补注册/补调用/删产物），重新编译验证
+
+---
+
+### 4.6 apply 阶段集成示例
+
+**步骤 6.4 编译验证后追加**：
+
+```markdown
+#### 6.4.6 孤儿产物检查（apply 阶段必检）
+
+对于 [Client]/[Server]/[Config] 任务，编译通过后立即执行孤儿检查：
+
+\```bash
+python schemas/lr-func-dev/rules/common/orphan-check.py --scope <模块名>
+\```
+
+**退出码 0** → 无孤儿，继续勾选 checkbox
+
+**退出码 1** → 发现警告，人工核查：
+- 合法例外（Page 通过父 Panel 打开、Lua 驱动的 CommandID 等）→ 在 implementation-report.md 记录"已核查"
+- 真孤儿 → 立即修复（补注册/补调用），重新编译+孤儿检查，通过后再勾选
+
+**退��码 2** → 脚本执行错误，检查 `CLIENT_ROOT` 环境变量或相对路径推断是否正确
+```
+
+---
+
+## 5. 调用方集成指南
+
+### 5.1 apply 阶段（lr-openspec-apply）
+
+### 5.1 apply 阶段（lr-openspec-apply）
 
 **引用位置**：
-- 步骤 6.5.2 客户端增量编译检查 → 本文件第 1 节（Unity MCP 优先）或第 2 节（兜底）
-- 步骤 6.5.3 客户端批量编译验证 → 同 6.5.2
-- 步骤 6.5.5 服务端编译验证 → 本文件第 3 节
+- 步骤 6.4.2 客户端增量编译检查 → 本文件第 1 节（Unity MCP 优先）或第 2 节（兜底）
+- 步骤 6.4.3 客户端批量编译验证 → 同 6.4.2
+- 步骤 6.4.5 服务端编译验证 → 本文件第 3 节
+- 步骤 6.4.6 孤儿产物检查 → 本文件第 4 节（编译通过后立即执行）
 
 **保留 apply 特有逻辑**：
 - `fix_compile_errors.py` 自动修复流程（最多3轮）
@@ -278,7 +399,7 @@ python -c "print(open('<file>', 'rb').read().count(b'\xef\xbf\xbd'))"
 
 ---
 
-### 4.2 reconcile 阶段（lr-openspec-reconcile）
+### 5.2 reconcile 阶段（lr-openspec-reconcile）
 
 **引用时机**：在"修复不一致"后，**立即触发**一次编译验证（不能等到下个阶段）
 
@@ -295,7 +416,7 @@ python -c "print(open('<file>', 'rb').read().count(b'\xef\xbf\xbd'))"
 
 ---
 
-### 4.3 code-review 阶段（lr-openspec-code-review）
+### 5.3 code-review 阶段（lr-openspec-code-review）
 
 **引用时机**：如果审查过程中修复了代码，建议立即编译验证（可选）
 
@@ -306,7 +427,7 @@ python -c "print(open('<file>', 'rb').read().count(b'\xef\xbf\xbd'))"
 
 ---
 
-### 4.4 ui-prefab 阶段（lr-openspec-ui-prefab）
+### 5.4 ui-prefab 阶段（lr-openspec-ui-prefab）
 
 **引用位置**：
 - 步骤 6 部署完成后 → 本文件第 1.2 节（`assets-refresh` 触发编译）

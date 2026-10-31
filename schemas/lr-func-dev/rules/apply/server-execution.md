@@ -12,7 +12,7 @@
 
 **文件路径**（绝对路径，固定）：
 ```
-D:\se\develop\server\project\AGENTS.md
+..\develop\server\project\AGENTS.md
 ```
 
 **读取后判断**：
@@ -35,8 +35,8 @@ D:\se\develop\server\project\AGENTS.md
 - 任务涉及协议号分配 / 协议字段布局
 
 **强制流程**：
-1. 读取 `D:\se\develop\server\project\.agents\skills\lr-generated-code-workflow\SKILL.md`
-2. 读取 `D:\se\develop\server\project\.agents\skills\lr-generated-code-workflow\references\generation-chains.md`
+1. 读取 `..\develop\server\project\.agents\skills\lr-generated-code-workflow\SKILL.md`
+2. 读取 `..\develop\server\project\.agents\skills\lr-generated-code-workflow\references\generation-chains.md`
 3. 判断目标文件头部是否有 "Generated from ... Do not edit." 标记，或搜索该符号是否能在下列源目录中找到源定义：
    - `cons/res/struct/**/*.xml`
    - `cons/def/configs/*.xml`
@@ -235,7 +235,7 @@ svn revert -R .
 
 **参考文档**：
 ```
-D:\se\develop\server\project\.agents\skills\lr-server-code-style\SKILL.md
+..\develop\server\project\.agents\skills\lr-server-code-style\SKILL.md
 ```
 
 **关键规则摘要（详细规则以原文件为准）**：

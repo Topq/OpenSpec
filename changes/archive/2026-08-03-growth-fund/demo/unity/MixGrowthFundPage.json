@@ -1,0 +1,566 @@
+{
+  "name": "MixGrowthFundPage",
+  "component": "surface.panel",
+  "pos": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "size": [
+    1920.0,
+    1080.0
+  ],
+  "anchors": [
+    0.5,
+    0.5,
+    0.5,
+    0.5
+  ],
+  "pivot": [
+    0.5,
+    0.5
+  ],
+  "text": "{/* 顶部区域 */}{/* 奖励列表区域：list.single-scroll 由生成器的 postProcess 钩子自动创建\n          Viewport/Content/Scrollbar 层级，这里只需引用 Viewport/Content 挂载\n          cellTemplate。C# 侧用 SingleScrollView.cellTemplate + onCellUpdate\n          回调管理复用，Page 脚本上不存在 m_RewardListContent 字段。 */}",
+  "tag": "div",
+  "children": [
+    {
+      "name": "Header",
+      "pos": [
+        0.0,
+        440.0,
+        0.0
+      ],
+      "size": [
+        900.0,
+        100.0
+      ],
+      "anchors": [
+        0.5,
+        0.5,
+        0.5,
+        0.5
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ],
+      "text": "{/* 基金标题 */}{/* 价格文本 */}{/* 购买按钮 */}",
+      "tag": "div",
+      "children": [
+        {
+          "name": "TxtTitle",
+          "component": "text.localized",
+          "field": "m_TxtTitle",
+          "text": "成长基金",
+          "textStyle": "title",
+          "textAlign": "Left",
+          "pos": [
+            -300.0,
+            20.0,
+            0.0
+          ],
+          "size": [
+            300.0,
+            40.0
+          ],
+          "anchors": [
+            0.5,
+            0.5,
+            0.5,
+            0.5
+          ],
+          "pivot": [
+            0.0,
+            0.5
+          ],
+          "tag": "span"
+        },
+        {
+          "name": "TxtPrice",
+          "component": "text.localized",
+          "field": "m_TxtPrice",
+          "text": "¥30",
+          "textAlign": "Left",
+          "pos": [
+            -300.0,
+            -20.0,
+            0.0
+          ],
+          "size": [
+            200.0,
+            30.0
+          ],
+          "anchors": [
+            0.5,
+            0.5,
+            0.5,
+            0.5
+          ],
+          "pivot": [
+            0.0,
+            0.5
+          ],
+          "tag": "span"
+        },
+        {
+          "name": "BtnPurchase",
+          "component": "control.button",
+          "field": "m_BtnPurchase",
+          "pos": [
+            250.0,
+            0.0,
+            0.0
+          ],
+          "size": [
+            200.0,
+            80.0
+          ],
+          "anchors": [
+            0.5,
+            0.5,
+            0.5,
+            0.5
+          ],
+          "pivot": [
+            0.5,
+            0.5
+          ],
+          "tag": "button",
+          "children": [
+            {
+              "name": "TxtBtnPurchase",
+              "component": "text.localized",
+              "field": "m_TxtBtnPurchase",
+              "text": "购买",
+              "textAlign": "Center",
+              "pos": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "size": [
+                200.0,
+                80.0
+              ],
+              "anchors": [
+                0.5,
+                0.5,
+                0.5,
+                0.5
+              ],
+              "pivot": [
+                0.5,
+                0.5
+              ],
+              "tag": "span"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ScrollRewards",
+      "component": "list.single-scroll",
+      "field": "m_ScrollRewards",
+      "pos": [
+        0.0,
+        -50.0,
+        0.0
+      ],
+      "size": [
+        900.0,
+        700.0
+      ],
+      "anchors": [
+        0.5,
+        0.5,
+        0.5,
+        0.5
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ],
+      "tag": "div",
+      "children": [
+        {
+          "name": "Content",
+          "prefabChildPath": "Viewport/Content",
+          "text": "{/* 奖励行模板 (MixGrowthFundRewardTierRow) - SingleScrollView.cellTemplate，\n              运行时按需 Instantiate 复用，模板自身在层级里保持 inactive。\n              data-lr-component 开启新作用域：此节点自身没有 data-field（Page 脚本上\n              没有对应字段，cellTemplate 由生成器的 ConfigureSingleScrollView 钩子\n              自动发现并赋值），但其子树内的 data-field（m_TxtCondition 等）绑定到\n              这个 Row 组件实例。 */}",
+          "tag": "div",
+          "children": [
+            {
+              "name": "RewardRowTemplate",
+              "component": "surface.page",
+              "lrComponent": "LR.MixGrowthFundRewardTierRow",
+              "visible": "false",
+              "pos": [
+                444.0,
+                -116.75,
+                0.0
+              ],
+              "size": [
+                860.0,
+                150.0
+              ],
+              "anchors": [
+                0.0,
+                1.0,
+                0.0,
+                1.0
+              ],
+              "pivot": [
+                0.5,
+                0.5
+              ],
+              "text": "{/* 条件进度列 */}{/* 免费奖励格子 (MixGrowthFundRewardCell) - 独立作用域，字段绑到这个 Cell 实例 */}{/* 投资奖励格子 (MixGrowthFundRewardCell) - 独立作用域，同名字段不与 FreeCell 冲突 */}",
+              "tag": "div",
+              "children": [
+                {
+                  "name": "ConditionColumn",
+                  "pos": [
+                    150.0,
+                    0.0,
+                    0.0
+                  ],
+                  "size": [
+                    200.0,
+                    120.0
+                  ],
+                  "anchors": [
+                    0.0,
+                    0.5,
+                    0.0,
+                    0.5
+                  ],
+                  "pivot": [
+                    0.5,
+                    0.5
+                  ],
+                  "text": "{/* 条件文本 */}{/* 进度条 */}",
+                  "tag": "div",
+                  "children": [
+                    {
+                      "name": "TxtCondition",
+                      "component": "text.localized",
+                      "field": "m_TxtCondition",
+                      "text": "0/100",
+                      "textAlign": "Center",
+                      "pos": [
+                        0.0,
+                        30.0,
+                        0.0
+                      ],
+                      "size": [
+                        200.0,
+                        30.0
+                      ],
+                      "anchors": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        0.5
+                      ],
+                      "pivot": [
+                        0.5,
+                        0.5
+                      ],
+                      "tag": "span"
+                    },
+                    {
+                      "name": "ConditionBar",
+                      "component": "control.progress",
+                      "field": "m_ConditionBar",
+                      "pos": [
+                        0.0,
+                        -10.0,
+                        0.0
+                      ],
+                      "size": [
+                        180.0,
+                        20.0
+                      ],
+                      "anchors": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        0.5
+                      ],
+                      "pivot": [
+                        0.5,
+                        0.5
+                      ],
+                      "tag": "div"
+                    }
+                  ]
+                },
+                {
+                  "name": "FreeCell",
+                  "component": "surface.page",
+                  "lrComponent": "LR.MixGrowthFundRewardCell",
+                  "field": "m_FreeCell",
+                  "pos": [
+                    553.1,
+                    0.0,
+                    0.0
+                  ],
+                  "size": [
+                    120.0,
+                    120.0
+                  ],
+                  "anchors": [
+                    0.0,
+                    0.5,
+                    0.0,
+                    0.5
+                  ],
+                  "pivot": [
+                    0.5,
+                    0.5
+                  ],
+                  "tag": "div",
+                  "children": [
+                    {
+                      "name": "ImgIconRoot",
+                      "component": "content.item-icon-root",
+                      "field": "m_ImgIconRoot",
+                      "pos": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "size": [
+                        80.0,
+                        80.0
+                      ],
+                      "anchors": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        0.5
+                      ],
+                      "pivot": [
+                        0.5,
+                        0.5
+                      ],
+                      "tag": "div"
+                    },
+                    {
+                      "name": "LockBadge",
+                      "component": "content.icon",
+                      "field": "m_LockBadge",
+                      "visible": "false",
+                      "pos": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "size": [
+                        80.0,
+                        80.0
+                      ],
+                      "anchors": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        0.5
+                      ],
+                      "pivot": [
+                        0.5,
+                        0.5
+                      ],
+                      "tag": "div"
+                    },
+                    {
+                      "name": "RedPoint",
+                      "component": "feedback.red-point",
+                      "field": "m_RedPoint",
+                      "visible": "false",
+                      "pos": [
+                        35.0,
+                        35.0,
+                        0.0
+                      ],
+                      "size": [
+                        20.0,
+                        20.0
+                      ],
+                      "anchors": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        0.5
+                      ],
+                      "pivot": [
+                        0.5,
+                        0.5
+                      ],
+                      "tag": "div"
+                    },
+                    {
+                      "name": "ClaimedMask",
+                      "component": "content.icon",
+                      "field": "m_ClaimedMask",
+                      "visible": "false",
+                      "pos": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "size": [
+                        80.0,
+                        80.0
+                      ],
+                      "anchors": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        0.5
+                      ],
+                      "pivot": [
+                        0.5,
+                        0.5
+                      ],
+                      "tag": "div"
+                    }
+                  ]
+                },
+                {
+                  "name": "PayCell",
+                  "component": "surface.page",
+                  "lrComponent": "LR.MixGrowthFundRewardCell",
+                  "field": "m_PayCell",
+                  "pos": [
+                    688.4,
+                    0.0,
+                    0.0
+                  ],
+                  "size": [
+                    120.0,
+                    120.0
+                  ],
+                  "anchors": [
+                    0.0,
+                    0.5,
+                    0.0,
+                    0.5
+                  ],
+                  "pivot": [
+                    0.5,
+                    0.5
+                  ],
+                  "tag": "div",
+                  "children": [
+                    {
+                      "name": "ImgIconRoot",
+                      "component": "content.item-icon-root",
+                      "field": "m_ImgIconRoot",
+                      "pos": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "size": [
+                        80.0,
+                        80.0
+                      ],
+                      "anchors": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        0.5
+                      ],
+                      "pivot": [
+                        0.5,
+                        0.5
+                      ],
+                      "tag": "div"
+                    },
+                    {
+                      "name": "LockBadge",
+                      "component": "content.icon",
+                      "field": "m_LockBadge",
+                      "visible": "false",
+                      "pos": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "size": [
+                        80.0,
+                        80.0
+                      ],
+                      "anchors": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        0.5
+                      ],
+                      "pivot": [
+                        0.5,
+                        0.5
+                      ],
+                      "tag": "div"
+                    },
+                    {
+                      "name": "RedPoint",
+                      "component": "feedback.red-point",
+                      "field": "m_RedPoint",
+                      "visible": "false",
+                      "pos": [
+                        35.0,
+                        35.0,
+                        0.0
+                      ],
+                      "size": [
+                        20.0,
+                        20.0
+                      ],
+                      "anchors": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        0.5
+                      ],
+                      "pivot": [
+                        0.5,
+                        0.5
+                      ],
+                      "tag": "div"
+                    },
+                    {
+                      "name": "ClaimedMask",
+                      "component": "content.icon",
+                      "field": "m_ClaimedMask",
+                      "visible": "false",
+                      "pos": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "size": [
+                        80.0,
+                        80.0
+                      ],
+                      "anchors": [
+                        0.5,
+                        0.5,
+                        0.5,
+                        0.5
+                      ],
+                      "pivot": [
+                        0.5,
+                        0.5
+                      ],
+                      "tag": "div"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

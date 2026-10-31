@@ -81,7 +81,7 @@ Read(changes/{change-id}/reconcile-report.md)  # 若存在
 # 示例：扫描服务端文件
 Grep(
     pattern="args\\.(IntVal|StringVal)\\([0-9]+\\)",
-    path="D:/se/develop/server/project/FsGame/ActivityModule/BusinessActivity/GrowthFund/MixGrowthFundEventCallBack.cpp",
+    path="../develop/server/project/FsGame/ActivityModule/BusinessActivity/GrowthFund/MixGrowthFundEventCallBack.cpp",
     output_mode="content"
 )
 ```
@@ -123,14 +123,14 @@ Grep(pattern="args\\.(IntVal|StringVal)\\([0-9]+\\)", path="<协议处理函数�
 # 服务端模块目录
 Grep(
     pattern="args\\.IntVal\\([0-9]+\\)",
-    path="D:/se/develop/server/project/FsGame/ActivityModule/BusinessActivity/GrowthFund/",
+    path="../develop/server/project/FsGame/ActivityModule/BusinessActivity/GrowthFund/",
     output_mode="content"
 )
 
 # 客户端模块目录
 Grep(
     pattern="BAMixGrowthFundRewardRecCol\\.(\\w+)",
-    path="D:/se/develop/client/project/Assets/Script/LogicModule/ActivityModule/MixGrowthFundModule/",
+    path="../develop/client/project/Assets/Script/LogicModule/ActivityModule/MixGrowthFundModule/",
     output_mode="content"
 )
 ```
@@ -144,7 +144,7 @@ Grep(
 ```bash
 Grep(
     pattern="MixGrowthFund|BA_TYPE_MIX_GROWFUND",
-    path="D:/se/develop/server/project/FsGame",
+    path="../develop/server/project/FsGame",
     glob="*.cpp",
     output_mode="files_with_matches"
 )

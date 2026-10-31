@@ -16,7 +16,7 @@
 
 | 调查项 | 查询方式 | 目的 |
 |-------|---------|------|
-| **配置表是否已存在** | Glob: `D:/se/design/table/default_ios/*.xlsx` | 判断是新增还是扩展 |
+| **配置表是否已存在** | Glob: `../design/table/default_ios/*.xlsx` | 判断是新增还是扩展 |
 | **字段是否由代码固定** | CodeGraph: `struct CGrowthFundConfig TDGrowthFund` (客户端)<br>CodeGraph: `struct STGrowthFund` (服务端) | 识别固定字段 |
 | **导出机制是否特殊** | 检查自定义导出脚本 | 确认非标准流程 |
 
@@ -53,7 +53,7 @@
 **查询方式**：
 ```bash
 # 在策划配置目录搜索
-find D:/se/design/table/default_ios -name "*growth_fund*.xlsx"
+find ../design/table/default_ios -name "*growth_fund*.xlsx"
 ```
 
 **判断标准**：
@@ -159,7 +159,7 @@ struct STGrowthFundMainConfig
 ### 2.1 策划侧流程
 
 ```
-策划在 `D:/se/design/table/default_ios` 编辑 Excel 配置表
+策划在 `../design/table/default_ios` 编辑 Excel 配置表
   ↓
 Excel 保存后自动导出为 txt 文件
   ↓
@@ -197,7 +197,7 @@ CodeGraph 查询：LoadResource READ_FILE txt.ReadInt 配置加载
 ```
 配置表 txt 更新后
   ↓
-运行 `D:\se\develop\client\tools\table\output_code_csharp.bat`
+运行 `..\develop\client\tools\table\output_code_csharp.bat`
   ↓
 自动生成 C# 解析结构类 (TDXXXTable.cs)
   ↓
@@ -271,7 +271,7 @@ CodeGraph 查询：LoadResource READ_FILE txt.ReadInt 配置加载
 （完整字段定义，包含"状态"列标注）
 
 ### {配置表1}
-**表文件路径**: `D:/se/design/table/default_ios/{table_name}.xlsx`
+**表文件路径**: `../design/table/default_ios/{table_name}.xlsx`
 **状态**: ⚠️ 新增配置表 / 扩展现有表 / 部分字段由代码固定
 
 **完整字段定义**:
@@ -305,7 +305,7 @@ CodeGraph 查询：LoadResource READ_FILE txt.ReadInt 配置加载
 
 **outcode_config.json 配置建议**
 
-配置文件位置：`D:\se\develop\client\tools\table\table_config\outcode_config.json`
+配置文件位置：`..\develop\client\tools\table\table_config\outcode_config.json`
 
 #### 1. need_copy 配置
 **作用**：标记哪些配置表需要生成客户端 C# 代码
@@ -351,7 +351,7 @@ CodeGraph 查询：LoadResource READ_FILE txt.ReadInt 配置加载
 1. **核查 ConfigSyncModule 注册机制**：
    ```bash
    # 查找同类活动模块的配置加载实现
-   grep -rn "READ_SYNC_FILE\|READ_FILE" D:/se/develop/server/project/FsGame/ActivityModule/BusinessActivity/{同类模块}
+   grep -rn "READ_SYNC_FILE\|READ_FILE" ../develop/server/project/FsGame/ActivityModule/BusinessActivity/{同类模块}
    ```
    
 2. **关键判断依据**：

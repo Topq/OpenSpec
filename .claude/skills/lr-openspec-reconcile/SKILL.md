@@ -71,12 +71,12 @@ SERVER_CUSTOMMSG_MONTH_CARD_GIFT_TARGET_STATUS (2146)
 
 ```bash
 # 服务端协议定义
-Read("D:/se/develop/server/project/define/ClientCustomDefine.h")
-Read("D:/se/develop/server/project/define/ServerCustomDefine.h")
+Read("../develop/server/project/define/ClientCustomDefine.h")
+Read("../develop/server/project/define/ServerCustomDefine.h")
 
 # 客户端协议定义
-Read("D:/se/develop/client/project/Assets/Script/Define/ClientCustomID.cs")
-Read("D:/se/develop/client/project/Assets/Script/Define/ServerCustomID.cs")
+Read("../develop/client/project/Assets/Script/Define/ClientCustomID.cs")
+Read("../develop/client/project/Assets/Script/Define/ServerCustomID.cs")
 ```
 
 **提取协议注释**（使用 Grep 定位协议号，然后读取前面的注释行）：
@@ -84,7 +84,7 @@ Read("D:/se/develop/client/project/Assets/Script/Define/ServerCustomID.cs")
 ```bash
 # 示例：提取协议 678 的注释
 Grep("CLIENT_CUSTOMMSG_QUERY_MONTH_CARD_GIFT_TARGET.*678", 
-     path: "D:/se/develop/server/project/define/ClientCustomDefine.h",
+     path: "../develop/server/project/define/ClientCustomDefine.h",
      output_mode: "content", -B: 3)
 ```
 
@@ -101,14 +101,14 @@ Grep("CLIENT_CUSTOMMSG_QUERY_MONTH_CARD_GIFT_TARGET.*678",
 客户端发送代码：
 ```bash
 codegraph_explore("SendQueryGiftTarget CLIENT_CUSTOMMSG_QUERY_MONTH_CARD_GIFT_TARGET VarList", 
-                  projectPath: "D:/se/develop/client/project")
+                  projectPath: "../develop/client/project")
 ```
 查询目标：`VarList < activityId < targetRoleId` 的实际参数顺序和类型
 
 服务端解析代码：
 ```bash
 codegraph_explore("OnCustomQueryGiftTarget args.IntVal CLIENT_CUSTOMMSG_QUERY_MONTH_CARD_GIFT_TARGET", 
-                  projectPath: "D:/se/develop/server/project")
+                  projectPath: "../develop/server/project")
 ```
 查询目标：`args.IntVal(1)`, `args.Int64Val(2)` 的实际参数顺序和类型
 
@@ -117,14 +117,14 @@ codegraph_explore("OnCustomQueryGiftTarget args.IntVal CLIENT_CUSTOMMSG_QUERY_MO
 服务端发送代码：
 ```bash
 codegraph_explore("SERVER_CUSTOMMSG_MONTH_CARD_GIFT_TARGET_STATUS Custom CVarList msg", 
-                  projectPath: "D:/se/develop/server/project")
+                  projectPath: "../develop/server/project")
 ```
 查询目标：`msg << activityId << targetRoleId << cardCount` 的实际参数顺序
 
 客户端解析代码：
 ```bash
 codegraph_explore("SERVER_CUSTOMMSG_MONTH_CARD_GIFT_TARGET_STATUS IntVal VarList", 
-                  projectPath: "D:/se/develop/client/project")
+                  projectPath: "../develop/client/project")
 ```
 查询目标：`args.IntVal(1)`, `args.Int64Val(2)` 的实际参数解析顺序
 
@@ -225,13 +225,13 @@ GROWTH_FUND_OPEN_REC
 ```bash
 codegraph_explore("GROWTH_FUND_OPEN_REC Record.h 列枚举定义")
 ```
-项目路径：`D:/se/develop/server/project`
+项目路径：`../develop/server/project`
 
 **客户端**：
 ```bash
 codegraph_explore("BA_GROWTH_FUND_OPEN_REC BusinessActivityDefine.cs 枚举常量")
 ```
-项目路径：`D:/se/develop/client/project`
+项目路径：`../develop/client/project`
 
 查询目标：
 - 服务端：`#define GROWTH_FUND_OPEN_REC "growth_fund_open_rec"` + 列枚举
@@ -273,13 +273,13 @@ active_fund_main.txt
 ```bash
 codegraph_explore("struct STActiveFundMain 配置结构体字段")
 ```
-项目路径：`D:/se/develop/server/project`
+项目路径：`../develop/server/project`
 
 **客户端配置生成类**：
 ```bash
 codegraph_explore("TDActiveFundMainTable class 字段属性")
 ```
-项目路径：`D:/se/develop/client/project`
+项目路径：`../develop/client/project`
 
 查询目标：
 - 服务端：`struct STActiveFundMain { int nActiveId; fast_string strName; ... }`
@@ -288,7 +288,7 @@ codegraph_explore("TDActiveFundMainTable class 字段属性")
 #### 4.3 检查 outcode_config.json 配置
 
 ```bash
-Read(D:/se/develop/client/tools/table/table_config/outcode_config.json)
+Read(../develop/client/tools/table/table_config/outcode_config.json)
 ```
 
 检查：
@@ -331,8 +331,8 @@ Write(changes/{change-id}/reconcile-report.md)
 **检查时间**: 2026-07-24
 **检查维度**: 协议参数、Record 表结构、配置表字段定义
 **项目路径**:
-- 服务端: D:/se/develop/server/project
-- 客户端: D:/se/develop/client/project
+- 服务端: ../develop/server/project
+- 客户端: ../develop/client/project
 
 ---
 
@@ -440,25 +440,25 @@ Write(changes/{change-id}/reconcile-report.md)
 ```bash
 # 协议处理函数
 codegraph_explore("OnCustomGetReward args.IntVal protocol handler", 
-                  projectPath: "D:/se/develop/server/project")
+                  projectPath: "../develop/server/project")
 
 # Record 表定义
 codegraph_explore("GROWTH_FUND_OPEN_REC Record.h enum COL", 
-                  projectPath: "D:/se/develop/server/project")
+                  projectPath: "../develop/server/project")
 codegraph_explore("BA_GROWTH_FUND_OPEN_REC BusinessActivityDefine.cs", 
-                  projectPath: "D:/se/develop/client/project")
+                  projectPath: "../develop/client/project")
 
 # 配置结构体
 codegraph_explore("struct STActiveFundMain", 
-                  projectPath: "D:/se/develop/server/project")
+                  projectPath: "../develop/server/project")
 codegraph_explore("TDActiveFundMainTable class fields", 
-                  projectPath: "D:/se/develop/client/project")
+                  projectPath: "../develop/client/project")
 ```
 
 **备用方案**（CodeGraph 查询不到时）：
 ```bash
-Grep("args.IntVal", path: "D:/se/develop/server/project/SourceModule/ActivityModule/", glob: "*.cpp")
-Grep("#define.*_REC", path: "D:/se/develop/server/project/public/Record.h")
+Grep("args.IntVal", path: "../develop/server/project/SourceModule/ActivityModule/", glob: "*.cpp")
+Grep("#define.*_REC", path: "../develop/server/project/public/Record.h")
 ```
 
 **这不是自动化验证，而是 AI 辅助的一致性检查**。

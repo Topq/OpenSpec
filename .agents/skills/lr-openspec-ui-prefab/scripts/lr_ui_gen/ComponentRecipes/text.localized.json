@@ -1,0 +1,25 @@
+{
+  "semanticId": "text.localized",
+  "componentType": "UnityEngine.GameObject",
+  "description": "多语言文本组件（默认样式）。",
+  "components": [
+    {
+      "type": "TMPro.TextMeshProUGUI",
+      "properties": {
+        "font": "Assets/Resources/Font/fzhjtSDF.asset",
+        "fontSharedMaterial": "Assets/Resources/Font/fzhjtSDF_UI_Default.mat",
+        "fontSize": 24,
+        "color": "#FFFFFF",
+        "alignment": "Center"
+      }
+    }
+  ],
+  "hierarchy": [],
+  "notes": [
+    "默认样式：白色、24 号字、居中对齐、带默认描边材质",
+    "只在根节点挂载 TextMeshProUGUI 组件",
+    "Localizer 组件由 PostProcessNode 根据 field 绑定情况决定是否挂载：",
+    "  - 无 field 绑定：挂 Localizer（运行时多语言切换）",
+    "  - 有 field 绑定：不挂 Localizer（由 C# 脚本控制文本内容）"
+  ]
+}
