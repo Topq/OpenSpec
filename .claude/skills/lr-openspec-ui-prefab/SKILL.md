@@ -1,6 +1,6 @@
 ---
 name: lr-openspec-ui-prefab
-description: 根据已验收的 React 原型 + lr-openspec-apply 生成的 UI 脚本，生成 Unity UI Prefab 的中间数据（TSX），校验字段完整性后交给 Unity 常驻生成器一次性构建 GameObject 树、挂载组件、绑定序列化字段。强制使用 TextMeshPro。 SE UI 优先 ai-game-developer MCP。
+description: 根据已验收的 React 原型 + lr-openspec-apply 生成的 UI 脚本，生成 Unity UI Prefab 的中间数据（TSX），校验字段完整性后交给临时部署的 Unity 生成器一次性构建 GameObject 树、挂载组件、绑定序列化字段。强制使用 TextMeshPro。 SE UI 优先 ai-game-developer MCP。
 ---
 
 # OpenSpec UI Prefab 生成器
@@ -321,7 +321,13 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/unity_cli_wrapper.py <SE工�
 
 ### Unity Console 出现 `未找到类型: LR.xxx`
 
-说明 `unity-ui-components.md` 里记录的 LR 组件类名与项目实际类名不一致（比如命名空间变了）。回头核实真实类名，更新 `LRComponentRecipes.cs` 里对应的 `AddLRComponent` 调用参数，而不是改 TSX。
+先通过 SE 的 ai-game-developer MCP 核实真实类名与命名空间，再按报错来源定位维护位置：
+
+- JSON 配方声明的类型：检查 `scripts/lr_ui_gen/ComponentRecipes/<semanticId>.json` 中的 `componentType`、`components[].type` 和子层级组件类型，修正对应配方。
+- `postProcess` 后处理创建的类型：检查 `LRComponentRecipes.cs` 中实际命中的钩子（如滚动列表或输入框），修正该钩子的类型引用。
+- TSX 的 `data-lr-component` 显式挂载类型：核对其声明与 SE 脚本类型是否一致。
+
+修改原始配方或生成器后重新临时部署，通过 MCP 检查编译、组件类型和序列化引用；部署副本仍以本技能源码为准。
 
 ### 校验器报字段绑定缺失
 
@@ -333,7 +339,7 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/unity_cli_wrapper.py <SE工�
 
 ### 需要新增语义组件 ID
 
-不在本技能范围内直接扩充。回到 `lr-design` 的 `unity-ui-components.md` 维护流程：先用 MCP 扫描确认真实 Prefab 配方，再人工评审加入白名单，然后同步更新 `LRComponentRecipes.cs` 里的 `switch` 分支。
+不在本技能范围内直接扩充。回到 `lr-design` 的 `unity-ui-components.md` 维护流程：先用 MCP 扫描确认 SE 真实 Prefab 配方，再人工评审加入白名单，然后在 `scripts/lr_ui_gen/ComponentRecipes/` 下按 `semanticId` 新增对应 `.json` 配方。配方声明组件类型、属性与层级；确需新增或修改 `postProcess` 时，再维护 `LRComponentRecipes.cs` 中对应的后处理钩子并验证。
 
 ## 版本信息
 
@@ -345,7 +351,8 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/unity_cli_wrapper.py <SE工�
 
 **依赖工具**：
   - ai-game-developer MCP（Unity 插件）
-  - 项目常驻脚本：`Assets/Editor/LRUnityLayoutPrefabGenerator.cs`、`LRComponentRecipes.cs`、`LRFieldBinder.cs`（namespace `LRUIPrefabGen`）
+  - 临时部署的生成器源码：`LRUnityLayoutPrefabGenerator.cs`、`LRUnityLayoutCLI.cs`、`LRComponentRecipes.cs`、`LRFieldBinder.cs`、`ComponentRecipeLoader.cs`（namespace `LRUIPrefabGen`）。唯一真相源是本技能的 `scripts/lr_ui_gen/`，生成时部署至 `Assets/Editor/LRUIPrefabGen/`，完成后按步骤 8 清理。
+  - `LRUnityLayoutCLI.cs` 是可选 CLI 备用入口；默认仍通过 ai-game-developer MCP 调用生成器。
 
 **依赖配置**：
   - `.claude/skills/lr-design/references/unity-ui-components.md`——组件映射 + 默认样式

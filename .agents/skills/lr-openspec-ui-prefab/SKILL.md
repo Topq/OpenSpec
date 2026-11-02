@@ -1,6 +1,6 @@
 ---
 name: lr-openspec-ui-prefab
-description: 根据已验收的 React 原型 + lr-openspec-apply 生成的 UI 脚本，生成 Unity UI Prefab 的中间数据（TSX），校验字段完整性后交给 Unity 常驻生成器一次性构建 GameObject 树、挂载组件、绑定序列化字段。强制使用 TextMeshPro。 SE UI 优先 ai-game-developer MCP。
+description: 根据已验收的 React 原型 + lr-openspec-apply 生成的 UI 脚本，生成 Unity UI Prefab 的中间数据（TSX），校验字段完整性后交给临时部署的 Unity 生成器一次性构建 GameObject 树、挂载组件、绑定序列化字段。强制使用 TextMeshPro。 SE UI 优先 ai-game-developer MCP。
 ---
 
 # Codex 适配器

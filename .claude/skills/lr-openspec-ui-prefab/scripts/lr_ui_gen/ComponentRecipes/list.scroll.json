@@ -1,7 +1,7 @@
 {
   "semanticId": "list.scroll",
   "componentType": "UnityEngine.GameObject",
-  "description": "多列网格滚动列表。包含 ScrollRect、GridLayoutGroup、LR.ScrollView 和垂直 Scrollbar。",
+  "description": "多列网格滚动列表。包含 ScrollRect、LR.ScrollView 和垂直 Scrollbar，由 LR.ScrollView 计算单元格排列。",
   "components": [],
   "hierarchy": [],
   "postProcess": "grid-scroll-view",
@@ -9,14 +9,11 @@
     "通过 postProcess 钩子动态创建完整的网格滚动列表层级结构：",
     "  - 根节点：LR.ScrollView（继承自 ScrollRect）",
     "  - Viewport：RectMask2D 遮罩容器",
-    "  - Content：GridLayoutGroup 网格布局",
+    "  - Content：内容容器，动态尺寸",
     "  - Scrollbar Vertical：垂直滚动条",
-    "GridLayoutGroup 默认配置：",
-    "  - cellSize: [150, 150]",
-    "  - spacing: [10, 10]",
-    "  - startCorner: UpperLeft",
-    "  - startAxis: Horizontal",
-    "  - constraint: FixedColumnCount, constraintCount: 4",
+    "Content 上不挂 LayoutGroup：LR.ScrollView 通过 OnRefreshSize / OnGetPos 计算行列并直接设置单元格 anchoredPosition，额外的 LayoutGroup 会争用位置。",
+    "列数由 viewport 宽度和 m_CellWidth 等实际布局参数计算，不固定为四列。m_CellWidth / m_CellHeight 来自 Cell 模板的 RectTransform.sizeDelta。",
+    "Cell 模板可用 data-cell-template=\"true\" 显式标记；生成器将其写入 m_CellTemplate 并设为 inactive，运行时由列表复制显示单元格。",
     "注意：此配方不在 components 中定义任何组件，完全由 postProcess 钩子创建"
   ]
 }
