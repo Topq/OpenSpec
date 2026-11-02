@@ -486,16 +486,16 @@ void ShowBuffIcon(int buffId)
 
 ## HTML 属性语义
 
-| 属性 | 用途 |
-|---|---|
-| `id` | 当前 HTML 文档内稳定且唯一的节点标识 |
-| `data-lr-component` | 本文档白名单中的 Unity UI 语义组件 ID |
-| `data-lr-template` | 可复用模板的稳定名称或组件所使用的模板名称 |
-| `data-lr-slot` | 组件配方中的命名子槽位 |
-| `data-lr-bind` | 展示数据的业务绑定键 |
-| `data-lr-action` | 点击、切换等交互的业务动作键 |
-| `data-lr-visible-when` | 业务可见条件，不承载 CSS 布局信息 |
-| `data-lr-bake` | 转换阶段的烘焙控制值，具体值由转换器约定 |
+| 属性 | 用途 | 转 TSX 时的对应属性 / 是否进入生成 |
+|---|---|---|
+| `id` | 当前 HTML 文档内稳定且唯一的节点标识 | 不进入生成；TSX 用 `data-name` 作为节点名 |
+| `data-lr-component` | **原型阶段**的白名单语义组件 ID | 改为 `data-component`。TSX 中 `data-lr-component` 含义不同，只接受 C# 类型名（如 `LR.GodFortTalentCell`） |
+| `data-lr-template` | 可复用模板的稳定名称或组件所使用的模板名称 | 标记为 `data-cell-template="true"` |
+| `data-lr-slot` | 组件配方中的命名子槽位 | 不进入生成（生成器无对应实现） |
+| `data-lr-bind` | 展示数据的业务绑定键 | 不进入生成（生成器无对应实现）；字段绑定用 `data-field` |
+| `data-lr-action` | 点击、切换等交互的业务动作键 | 不进入生成，仅策划验收用 |
+| `data-lr-visible-when` | 业务可见条件，不承载 CSS 布局信息 | 不进入生成；TSX 用 `data-visible` 表示初始显隐（true/false） |
+| `data-lr-bake` | 转换阶段的烘焙控制值，具体值由转换器约定 | 不进入生成 |
 
 锚点、Pivot、布局、方向、尺寸和层级不新增属性表达。DOM 层级表示 Unity 层级；CSS 与浏览器计算结果表示视觉布局；转换器据此生成 RectTransform。
 

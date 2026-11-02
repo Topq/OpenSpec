@@ -224,14 +224,16 @@ graph TD
 | 任务类型 | CodeGraph 查询 | 参考模块 | 说明 |
 |---------|---------------|---------|------|
 | 静态配置加载 | `READ_FILE LoadResource txt.ReadInt` | AccrueRechargeModule.cpp | 打包时加载，运行时不变，不推送客户端 |
-| 动态配置加载（需同步客户端） | `READ_SYNC_FILE LoadResource load_sync_file` | BATreasureHuntModule::LoadRoutimeCfg | 接入 ConfigSyncModule 整表同步，支持运营期间调整 |
+| 旧活动文件整表同步 | `READ_SYNC_FILE LoadResource load_sync_file` | 同步入口确认后的 SE 同类活动模块 | 接入 ConfigSyncModule 文件拉取链；仅此分支要求 READ_SYNC_FILE |
+| 数据库配置同步 / 独立业务协议 | 按 design/config.md 指定的登记、请求与回包入口查询 | 当前 SE 实际实现 | 拆分对应登记/同步或协议任务，不强制改成活动文件同步宏 |
 | 配置结构体 | `struct ST 配置结构体` | AccrueRechargeModule.h | 定义配置字段映射 |
 
-**动态配置 vs 静态配置判断依据**：
-- **动态配置**：用于运营活动系统，需要运营期间调整（如活动奖励档位、任务目标）→ 使用 `READ_SYNC_FILE`
-- **静态配置**：游戏打包时固化，运行时不可调整（如怪物属性、技能配置）→ 使用 `READ_FILE`
+**先判加载方式，再判同步入口**：
+- **静态配置**：按 SE 实际静态加载方式使用 `READ_FILE`，无运行时同步需求不添加同步任务。
+- **运行时动态配置**：沿用 `design/config.md` 已核实的入口。旧活动文件拉取链才要求 `READ_SYNC_FILE`；数据库入口核查实际服务端登记/同步与客户端版本、请求、回包解析；独立业务协议核查协议字段和收发链。
+- 入口不明确时先补设计证据，不因“运营活动”或“动态配置”标签自动选宏；不能仅凭 `READ_FILE` 就断定所有入口都无法同步。具体门禁见 `rules/design/config-structure.md` 和 `rules/common/se-config-generation.md`（相对于 schema 根目录）。
 
-**READ_SYNC_FILE 宏作用**：
+**READ_SYNC_FILE 宏作用（仅旧活动文件拉取链）**：
 - 在 `READ_FILE` 基础上额外调用 `load_sync_file()` → `ConfigSyncModule::LoadFile()`
 - 将配置表注册进 `ConfigSyncModule::mFileMap`，客户端才能通过 `CLIENT_CUSTOMMSG_PULL_CFGSYNC_FILES` 拉取
 - 宏参数与 `READ_FILE` 完全一致，只需替换宏名即可接入同步

@@ -1,0 +1,6 @@
+interface:
+  display_name: "LR OpenSpec 一致性检查"
+  short_description: "比对技术设计与实际代码并生成跨端一致性差异报告"
+  default_prompt: "Use $lr-openspec-reconcile to compare the requested change design with its implementation."
+policy:
+  allow_implicit_invocation: false

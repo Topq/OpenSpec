@@ -56,7 +56,7 @@
 
 ### 4.0 前端架构设计
 
-> 说明：本节先于具体任务确定模块分层与数据流，避免所有逻辑堆进单一类。参考 `rules/tasks/client-implementation.md` 的"一点五、前端架构设计强制要求"，架构依据来自客户端知识库 `docs/ai-core/README.md`（knowledge/ 模块系统卡）。
+> 说明：本节先于具体任务确定模块分层与数据流，避免所有逻辑堆进单一类。参考 `rules/tasks/client-implementation.md` 的"一点五、前端架构设计强制要求"，架构依据来自客户端知识库 `../develop/client/project/docs/ai-core/README.md`（相对于 OpenSpec 根目录；`knowledge/` 模块系统卡相对于该知识库根目录）。
 
 #### 4.0.1 模块分层与职责
 [列出 Module（数据层）/ Page（视图控制器）/ Cell（可复用组件）各自的职责与"不做什么"]

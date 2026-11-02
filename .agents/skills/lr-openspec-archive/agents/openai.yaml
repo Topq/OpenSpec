@@ -1,0 +1,6 @@
+interface:
+  display_name: "LR OpenSpec 归档"
+  short_description: "校验并归档已完成变更，同时合并规范增量到主规范"
+  default_prompt: "Use $lr-openspec-archive to validate and archive the requested completed change."
+policy:
+  allow_implicit_invocation: false

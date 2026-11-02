@@ -1,5 +1,8 @@
 # design-client.md 生成规则（精简版 v2）
 
+> **SE 适配说明**：GodFort/神域防线及其返工频次是 DL 来源案例，不是 SE 当前文件或接口的证据。实际审查先读 SE `config.yaml` 路由的 ai-core，再用 SE CodeGraph/源码复验；来源案例和缺失的历史附件仅作说明，不作为必读依赖或通过依据。
+
+
 > **说明**: 本文档定义 design-client.md 的生成规则。
 > 该文档从 proposal.md 和 specs/*.md 生成，用于客户端工程师技术评审。
 > 
@@ -308,14 +311,16 @@ public override void ParamArgs(IVarList args) {
 
 | 场景 | 注册方法 | 回调签名 |
 |-----|---------|---------|
-| 活动框架内 | `BusinessActivityModule.RegisterRedPointCallback` | `bool callback(int activityId)` |
-| 独立功能 | `RedPointModule.Register` | `bool callback(RedPointType type)` |
+| 活动菜单/入口红点（接入 BusinessActivityModule） | `BusinessActivityModule.RegisterRedPointCallback` | `bool callback(int activityId)` |
+| 普通系统功能红点（非活动，或活动内自建红点节点） | `RedPointModule.Register` | `bool callback(RedPointType type)` |
 
-**注册时机**：模块初始化时（`OnInit()` 方法）
+**选择依据**：`BusinessActivityModule_RedPoint.cs` **只服务活动红点**——红点挂在哪个菜单由活动的 `Location` 决定，底层按 `funcId * 100` 注册到 `RedPointModule`。非活动的系统功能（主界面、养成、社交等）不要走 BA 回调，直接用 `RedPointModule`。
+
+**注册时机**：模块初始化时（`OnInit()` 方法）；父子红点聚合用 `RedPointModule.Bind(parent, child)`，数据变化自动失效用 `SetHookRecord` / `SetHookProp`。
 
 **红点刷新**：
-- 活动框架内：`m_BizActivityModule.DirtyRedPoint(activityId, activityType)`
-- 独立功能：`m_RedPointModule.SetDirty(redPointType)`
+- 活动红点：`m_BizActivityModule.DirtyRedPoint(activityId, activityType)`
+- 系统功能红点：`m_RedPointModule.SetDirty(redPointType)`
 
 **代码模板获取**：
 ```
@@ -371,7 +376,9 @@ UISript/<父级>/<功能模块>/
 
 ---
 
-**DynamicConfigModule 接入判断**（架构决策）：
+#### 2.3.1 配置表接入（DynamicConfigModule）
+
+**接入判断**（架构决策）：
 
 ```
 IF 满足以下任一条件
@@ -382,26 +389,92 @@ THEN 必须走 DynamicConfigModule 同步流程
 ELSE 协议实时下发即可
 ```
 
-**接入步骤**（固定流程，⚠️ 缺任何一步都会导致运行时数据为空，编译不会报错）：
-1. 修改 `..\develop\public\table_config\outcode_config.json`
+**接入步骤**（先确认使用 SE 数据库配置同步还是旧活动文件拉取链）：
+1. 按 `schemas/lr-func-dev/rules/common/se-config-generation.md` 判断并修改 `../develop/client/tools/table/table_config/outcode_config.json` 的 `need_copy` 和 SE 专有 `NeedParseDataMethod`
 2. 执行 `output_code_csharp.bat` 重新生成代码
-3. 实现 `TDXxxTableExtend.cs`（3 个方法：`InsertDynamicData`, `ParseComplete`, `ClearDynamicData`）
+3. 验证工具生成的 `TDXxxTableExtend.cs` 动态方法（`InsertDynamicData`, `ParseComplete`, `ClearDynamicData`），不手写替代生成产物
 4. 在 `DynamicConfigModule_Process.cs::InitProcessDic()` 中调用 `RegisterTable(...)`（表级注册，让 `DynamicConfigModule` 认得这张表的强类型解析方法）
-5. **活动所属的业务 Module 必须实现 `IConfigSyncMethod` 接口，并在 `OnInit()` 中调用 `m_DynamicConfigModule.RegisterSyncMethod(this)`**（活动级注册，让 `DynamicConfigModule` 知道"打开这个活动时要拉取哪些表"）
+5. **仅旧活动文件拉取链要求活动级注册**：业务 Module 实现 `IConfigSyncMethod`，并在 `OnInit()` 中调用 `m_DynamicConfigModule.RegisterSyncMethod(this)`，声明该活动按何种时机拉取哪些表。
    - `fileNameList`：活动面板打开时（`BusinessActivityModule.RequestActivityInfo` → `DynamicConfigModule.StartLoadFile`）才拉取的表
-   - `preFileNameList`：活动面板打开前就要提前拉取的表（如红点判断依赖的表），可为空数组
+   - `preFileNameList`：活动面板打开前就要提前拉取的表（如红点判断依赖的表）；两个属性均为 `string[]`，按实际加载时机填写，任一名单可为空，不强求两个都非空
    - 表名字符串必须与步骤 1 中 `outcode_config.json` 注册的表名完全一致（建议定义为 `{FuncName}Define.cs` 中的 `const string`，避免拼写不一致）
 
-**步骤 4 和步骤 5 是两个独立的注册维度，缺一不可**：
-- 只做步骤 4（`RegisterTable`）不做步骤 5（`RegisterSyncMethod`）→ 表能被解析，但没有任何活动会主动去拉取这张表的数据，`TDXxxTable.GetData()` 永远返回空/默认值，且没有任何编译错误或运行时报错提示（因为这张表在其他场景下可能已被其他活动拉取过，容易被误判为"能用"）
-- 只做步骤 5 不做步骤 4 → 编译报错（`RegisterTable` 找不到 `InsertDynamicData` 等生成方法）
+6. **数据库配置同步入口**：核查服务端登记/同步、首次主角 Ready 的数据库配置请求、版本计划与 `OnDataBaseConfigSync` 回包解析链；此入口不依赖 `IConfigSyncMethod`，不能因缺少活动级注册而判失败或补造活动类型。
+
+**按实际入口验证注册完整性**：
+- 旧活动文件拉取链缺步骤 5 → 目标活动无法按设计时机拉取配置；不能借其他活动已加载的数据掩盖遗漏。
+- 两种入口都要验证步骤 4 的表级适配；缺适配可能使数据仅进入原始同步缓存，强类型表仍为空，不能只凭编译通过判定接入完成。
 
 **验证方式（设计与实施阶段都必须检查）**：
-- 在目标业务 Module 的 `.h`/`.cs` 声明处（或 CodeGraph 查询该 Module）确认实现了 `IConfigSyncMethod`
-- 在该 Module 的 `OnInit()` 中确认存在 `m_DynamicConfigModule.RegisterSyncMethod(this)` 调用
-- 参考正确实现：`ActivityDrawKOIModule`（`ActivityDrawKOIModule_Message.cs` 实现接口 + `ActivityDrawKOIModule.cs::OnInit()` 调用 `RegisterSyncMethod`）、`MarblePlinkoModule`
+- 先记录使用哪个同步入口及 SE 源码依据；数据库入口按步骤 6 验证，不强求活动级接口
+- 旧活动文件拉取链：确认业务 Module 实现 `IConfigSyncMethod`，且 `OnInit()` 中存在 `m_DynamicConfigModule.RegisterSyncMethod(this)` 调用
+- 参考正确实现：`ActivityDrawKOIModule`（`ActivityDrawKOIModule_Message.cs` 实现接口 + `ActivityDrawKOIModule.cs::OnInit()` 调用 `RegisterSyncMethod`）、`DevelopPlanModule`
 
-**详细说明**：参考 `tmp/design-client-implementation-details.md`（若存在）
+**详细说明**：参考 `rules/tasks/client-implementation.md` §0.1 与 `rules/apply/config-execution.md` §4。
+
+---
+
+### 2.4 惯例落实五节（阻断性）
+
+只写"模块、接口、流程"不足以约束实现。凡涉及**新增客户端 UI 或模块**的变更，design-client.md 必须包含以下五张表；缺任意一张视为设计未完成，不得进入合并门禁。
+
+**依据**：神域防线（GodFort）初版 `r778930` 到终版的返工中，超过一半改动属于项目惯例对齐而非需求变化，全部落在下列五类。SE 的知识路由见 `../develop/client/project/docs/ai-core/knowledge/core-index.md`；以下五张表是本工作流交付要求，不假定 SE 有 DL 的阅读包。
+
+#### 2.4.1 文件与职责清单（枚举，不写"等"）
+
+| 文件 | 职责 | 拆分理由 |
+|---|---|---|
+| `XxxModule.cs` | public API + 生命周期 | 主文件 |
+| `XxxModule_Net.cs` | 协议收发 | 网络回调独立 |
+| `XxxPage.cs` | 页面交互与刷新 | 主文件 |
+| ... | ... | ... |
+
+要求：
+- 每个计划新增/修改的 `.cs` 单独一行，禁止 `XxxModule*.cs`、"以及相关文件"这类写法；
+- partial 拆分写理由（按职责还是按行数），不要求凑齐 `_State`/`_Net` 三件套；
+- 这张清单同时作为 `reconcile` 文件结构对账的基线。
+
+#### 2.4.2 事件订阅清单
+
+| 事件 | 监听方 | 处理函数读取的数据 | 刷新范围 | 不监听其他事件的理由 |
+|---|---|---|---|---|
+| `OnBusinessActivityDirty` | `XxxPage` | 阶段集合 | 页签开放状态 | 不显示 BA 行值，无需 Changed/LateChanged |
+| ... | ... | ... | ... | ... |
+
+要求：每条订阅都要写出"处理函数实际消费的数据"；写不出来的订阅不应出现在设计里。默认只监听真正驱动本界面数据的事件。
+
+#### 2.4.3 刷新粒度矩阵
+
+| 变化源 | 刷新区域 | 不重建的部分 |
+|---|---|---|
+| 切换难度 | 阶段详情、难度选中态、按钮 | 阶段列表、队伍、背景 |
+| 资金/冷却变化 | 可见格子 | 配置行、整页 |
+| ... | ... | ... |
+
+要求：禁止通篇只写 `RefreshState()`；必须说明哪些变化走全量刷新、哪些走局部刷新，并写明"重复选择同一项不刷新"。
+
+#### 2.4.4 请求校验位置
+
+| 协议/操作 | 本地校验内容 | 校验所在入口 | 服务器兜底的检查 |
+|---|---|---|---|
+| 领取奖励 | 是否已领取、是否达成 | `OnRewardCanGetBtn` | 领奖资格与幂等 |
+| ... | ... | ... | ... |
+
+要求：
+- 按 SE 同类实现和实际调用链确定校验入口：纯发送方法负责组包；作为多个调用方共享操作入口的 `RequestXxx` 可以集中校验资格、场景、余额或 CD。不得仅凭方法名禁止校验，也不得将已有集中校验移到部分 UI 入口而漏掉其他调用方；
+- 校验区分“未同步”与“已知不满足”；未同步时明确等待/重试或服务端兜底路径，不能直接视为资格通过；
+- 明确哪些校验必须由服务器兜底，客户端校验只做体验优化。
+
+#### 2.4.5 文案与就绪判定
+
+| 项 | 结论 |
+|---|---|
+| 静态文案 | 挂 `Localizer` 组件；key 列表：`UI_XxxPage_Title`、... |
+| 动态文案（含变量） | 脚本 `"{key}".ToLanguageF(...)`；key 列表：... |
+| 数据就绪判定 | Record 可读 / 配置行存在 / 场景就绪，分别用什么条件判断 |
+| 禁止缓存的状态 | 就绪标志、pending 表、版本号（可由数据直接判断） |
+
+要求：文案 key 与 `Language_Keys.md` 保持一致；就绪判定必须给出可判定的条件，禁止写"加载完成后""数据准备好后"。
 
 ---
 
@@ -470,6 +543,13 @@ ELSE 协议实时下发即可
 ## 红点规则
 （说明注册方式）
 
+## 惯例落实（五张表，见 §2.4，缺一不可）
+- 文件与职责清单（枚举每个 .cs）
+- 事件订阅清单
+- 刷新粒度矩阵
+- 请求校验位置
+- 文案与就绪判定
+
 ## 关键功能说明
 （职责和设计决策，不包含代码实现）
 
@@ -530,7 +610,7 @@ ELSE 协议实时下发即可
 | 需求 | CodeGraph 查询 | 参考模块 |
 |-----|---------------|---------|
 | 活动红点注册 | `RegisterRedPointCallback BusinessActivityType` | BusinessActivityModule_RedPoint.cs |
-| 独立红点注册 | `RedPointModule Register RedPointType` | RedPointModule.cs |
+| 系统功能红点注册 | `RedPointModule Register Bind RedPointType` | RedPointModule.cs |
 | 红点刷新 | `DirtyRedPoint SetDirty` | - |
 
 ---
@@ -578,6 +658,6 @@ grep -r "AddCustomHook.*CLIENT_CUSTOMMSG" Assets/Script/LogicModule/
 
 ---
 
-**版本**: v2 (精简版)  
-**最后更新**: 2026-07-22  
+**版本**: v2 (精简版)
+**最后更新**: 2026-10-31（新增 §2.4 惯例落实五节）
 **维护原则**: 只包含"无法从代码推理的知识"

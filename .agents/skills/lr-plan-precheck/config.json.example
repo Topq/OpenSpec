@@ -1,5 +1,0 @@
-{
-  "app_id": "cli_xxxxxxxxxxxxxxxx",
-  "app_secret": "在这里填入飞书应用密钥",
-  "base_url": "https://open.feishu.cn"
-}

@@ -10,12 +10,12 @@
 
 **生成客户端 C# 代码前，必须阅读并遵守项目编码规范：**
 
-规范入口（相对于客户端工程根目录）：
+规范入口（相对于 OpenSpec 根目录，即 `config.yaml` 所在目录）：
 ```
-docs/ai-core/rules/coding_standards/README.md
+../develop/client/project/docs/ai-core/rules/coding_standards/README.md
 ```
 
-**必读文件清单**（相对 `docs/ai-core/rules/coding_standards/`，以各原文件为准）：
+**必读文件清单**（相对知识库的 `rules/coding_standards/`，以各原文件为准）：
 - `csharp_spec.md` — 基础编码规范（如 `m_` 前缀、类内成员排列顺序、数据结构类的公有变量原则等）
 - `csharp_safe.md` — 保护规范（如判空、越界、生命周期管理）
 - `csharp_gc.md` — GC 优化规则（如避免 foreach 装箱、慎用 LINQ、字符串拼接用 StringBuilder 等）
@@ -70,21 +70,23 @@ docs/ai-core/rules/coding_standards/README.md
 
 ## 0.1 配置表代码生成规范（强制）
 
+> SE 专有生成规则：先读 `schemas/lr-func-dev/rules/common/se-config-generation.md`；`need_copy` 与 `NeedParseDataMethod` 分开判断，S 字段动态解析走工具临时转换，源表必须恢复。
+
 **禁止手写配置表 CS 代码**，必须通过工具生成。
 
 ### 配置表代码生成流程
 
 **步骤 1：注册配置表名**
 - 文件：`..\develop\client\tools\table\table_config\outcode_config.json`
-- 在 `need_copy` 数组中添加表名（不含 `.txt` 后缀，小写+下划线格式）
+- 按客户端静态需求判断是否加入 `need_copy`，不默认所有表都加入；表名不含 `.txt` 后缀
 - 示例：`"active_fund_main"`, `"activity_mix_growthfund_reward"`
 
 **步骤 2：检查是否需要 NeedParseDataMethod 配置**
-- 如果配置表字段属性为 **纯S（Server only）** 且用于活动系统，需额外配置
+- 如果客户端需要生成表类的运行时动态解析能力（与 S/C/A 归属分开判断），需配置
 - 在 `NeedParseDataMethod` 数组中添加同样的表名
-- **判断依据**：查看 `design/config.md` 中字段定义表的"属性"列
-  - 所有字段都标记为 S → 需要添加到 `NeedParseDataMethod`
-  - 有任何字段标记为 C 或 A → 不需要添加
+- **判断依据**：查看 `design/config.md` 的动态解析结论和 SE 生成约定；属性列只用于判断字段归属
+  - 需要客户端表类动态解析（包括命中 SE 临时 S→A 流程的表）→ 判断并登记 `NeedParseDataMethod`，不只看是否全 S
+  - 不使用生成表类动态解析（纯静态加载或独立业务协议）→ 不加入，与 C/A/S 标记分开判断
 
 **步骤 3：生成代码**
 - 双击运行 `..\develop\client\tools\table\output_code_csharp.bat`
@@ -105,23 +107,24 @@ docs/ai-core/rules/coding_standards/README.md
 
 ---
 
-### ⚠️ 配置表接入 DynamicConfigModule 有两级注册，任务清单必须各出一条任务（阻断性）
+### ⚠️ DynamicConfigModule 按同步入口拆分接入任务（阻断性）
 
 **背景**：步骤 1-4（`outcode_config.json` + `output_code_csharp.bat` + `TDXxxTableExtend.cs` + `DynamicConfigModule_Process.cs::RegisterTable`）只完成了**表级注册**——让框架认得这张表怎么解析。这一步做完后编译能通过，`TDXxxTable` 类也存在，很容易被误判为"已经接入完成"。
 
-**但表级注册之外还有活动级注册**：必须有某个业务 Module 实现 `IConfigSyncMethod` 接口，把这张表的表名放进它的 `fileNameList`，并在该 Module 的 `OnInit()` 里调用 `m_DynamicConfigModule.RegisterSyncMethod(this)`。这一步告诉框架"玩家打开这个活动时，需要主动去拉取这些表的数据"。**没有这一步，`TDXxxTable.GetData()` 永远返回空/默认值，且编译和运行时都不会报错**（因为查表接口本身是合法调用，只是数据从未被拉取过）。
+**先确认实际同步入口**：旧活动文件拉取链还需要业务 Module 实现 `IConfigSyncMethod`，在 `fileNameList` / `preFileNameList` 声明按需/提前加载的表，并在 `OnInit()` 调用 `m_DynamicConfigModule.RegisterSyncMethod(this)`。数据库配置同步则核查服务端登记/同步、首次 Ready 的数据库配置请求、版本计划和回包解析，不依赖活动级接口，不能为了接表自造活动类型。两种入口都要保留表级注册和 SE `NeedParseDataMethod` 生成验证。
 
 **任务清单生成要求**：
-- 凡是给活动模块（`XxxModule.cs`）新增了通过 `DynamicConfigModule` 整表同步的配置表，任务清单里必须包含一条独立任务，明确写出：
+- 走旧活动文件拉取链时，除表级注册任务外，必须包含一条独立活动级注册任务，明确写出：
   1. `XxxModule` 声明实现 `IConfigSyncMethod`
-  2. 在 `fileNameList`（或 `preFileNameList`，视是否需要提前加载而定）中列出新增的表名
+  2. 在 `string[] fileNameList`（或 `string[] preFileNameList`，视是否需要提前加载而定）中列出新增的表名；任一名单可为空，不强求两个都非空
   3. 在 `OnInit()` 中调用 `m_DynamicConfigModule.RegisterSyncMethod(this)`
 - 不能把这一步隐含在"创建 XxxModule.cs 骨架"这类笼统任务描述里——必须单独列出，避免被漏掉（`RegisterTable` 任务完成后容易误以为"配表已经通了"就此止步）
+- 走数据库入口时，单列对应服务端登记/同步和客户端请求/解析验证任务，活动级接口标为不适用并说明依据。
 - 代码模板查询：`codegraph explore "IConfigSyncMethod RegisterSyncMethod fileNameList"`，参考模块：`ActivityDrawKOIModule`、`MarblePlinkoModule`
 
 **验证方式**：
-- 编译通过（`XxxModule : ILogicModule, IConfigSyncMethod` 无缺失成员报错）
-- 运行时打开该活动面板后，`TDXxxTable.GetData(id)` 能读到非默认值（而非表级注册验证只看"编译通过、类存在"）
+- 编译通过；旧活动链的 `IConfigSyncMethod` 实现无缺失成员报错，数据库入口不强求该接口
+- 在设计规定的加载时机（提前加载、打开活动或数据库同步完成）检查 `TDXxxTable.GetData(id)` 能读到已知测试行，不仅看“编译通过、类存在”；无配置行的合法空数据场景单独验证
 
 ---
 
@@ -132,21 +135,20 @@ docs/ai-core/rules/coding_standards/README.md
 ### UI 注册流程
 
 **步骤 1：添加 UIID 枚举**
-- 文件：`..\develop\client\project\Assets\Script\Table\Data\Define\UIDefine.cs`
+- 文件：`../develop/client/project/Assets/Script/Table/Data/Define/UIDefine.cs`
 - 在 `enum UIID` 中添加新的 UI ID（按功能模块分组，插入到相似 UI 附近）
 - 命名规则：UI 类名去掉 `.cs` 后缀，保持大小写一致
 - 示例：
   ```csharp
   // 运营活动
-  SpecialLoginActivityPage,          // 七日登陆活动(通用模板)
-  ActivitySevenDayTaskPage,           // 七日任务活动
-  ActivityDevelopPlanPage,            // 成长计划活动
-  GrowthFundPage,                     // 成长基金活动（新增）
-  ActivityDrawKOIPage,                // 锦鲤活动
+  SpecialLoginActivityPage,             // 七日登录界面
+  TotalRechargeRewardPage,           // 累充活动
+  GrowthFundPage,                    // 成长基金活动
+  XxxActivityPage,                   // 本次新增活动
   ```
 
 **步骤 2：注册 UI 到 UIDataTable**
-- 文件：`..\develop\client\project\Assets\Script\LogicModule\UIModule\Data\UIDataTable.cs`
+- 文件：`../develop/client/project/Assets/Script/LogicModule/UIModule/Data/UIDataTable.cs`
 - 在 `InitUIDataTable()` 方法中添加 `AddPanelData` 调用（按功能模块分组，插入到相似 UI 附近）
 - API 格式：
   ```csharp
@@ -159,9 +161,9 @@ docs/ai-core/rules/coding_standards/README.md
   ```csharp
   // 运营活动
   AddPanelData(UIID.SpecialLoginActivityPage, typeof(SpecialLoginActivityPage), "WelfareActivityPanel/SpecialLoginActivityPage");
-  AddPanelData(UIID.ActivitySevenDayTaskPage, typeof(ActivitySevenDayTaskPage), "WelfareActivityPanel/ActivitySevenDayTaskPage");
-  AddPanelData(UIID.ActivityDevelopPlanPage, typeof(ActivityDevelopPlanPage), "WelfareActivityPanel/ActivityDevelopPlanPage");
+  AddPanelData(UIID.TotalRechargeRewardPage, typeof(TotalRechargeRewardPage), "WelfareActivityPanel/TotalRechargeRewardPage");
   AddPanelData(UIID.GrowthFundPage, typeof(GrowthFundPage), "WelfareActivityPanel/GrowthFundPage");
+  AddPanelData(UIID.XxxActivityPage, typeof(XxxActivityPage), "WelfareActivityPanel/XxxActivityPage");
   ```
 
 **步骤 3：验证注册**
@@ -172,6 +174,33 @@ docs/ai-core/rules/coding_standards/README.md
 - 未注册 UIID：`UIID.GrowthFundPage` 编译错误（CS0117）
 - 未注册 UIDataTable：运行时调用 `OpenPage(UIID.GrowthFundPage)` 无反应或报空引用错误
 - Prefab 路径错误：UI 能打开但显示为空或加载失败
+
+---
+
+## 0.3 框架接入任务包（阻断性）
+
+新增客户端 UI 或活动模块时，以下九类接入项必须**逐项判断并按需独立成条**，不得并入"创建 Xxx 模块/页面"这类笼统任务。不适用的写明理由，不能默认省略。
+
+| # | 接入项 | 何时适用 | 任务要求 | 参考 |
+|---|---|---|---|---|
+| 1 | UIID + UIDataTable | 新增任何 `AbstractPage` / `AbstractPanel` | `UIDefine.cs` 加枚举；`UIDataTable.InitUIDataTable()` 加 `AddPanelData` | 本文件 §0.2 |
+| 2 | Container | 使用公共容器承载列表/分页 | 新建 Cell、注册到 Container、确认模板字段绑定 | 查同容器下其他功能 |
+| 3 | MainArea | 功能入口挂在主界面区域 | 在 `MainArea` / `MainPanelModule` 注册入口，确认可见性与跳转参数 | `MainArea` 现有注册点 |
+| 4 | LogicStrategy | 场景内玩法，需要结算/离开/功能屏蔽策略 | 新建 `XxxStrategy : NormalLogicStrategy`；在 `LogicStrategyModule` 按 `LEVEL_CLASSS` 分发 | `../develop/client/project/docs/ai-core/knowledge/modules/index.md`；SE 同类 Strategy |
+| 5 | Localizer key | UI 含静态文案 | 挂 `Localizer` 组件；新增 key 进 `Language_Keys.md`；区分静态组件与动态 `ToLanguageF` | 本文件 §0.2 / apply/client-execution.md §3 |
+| 6 | BA 通知 | 接入 `BusinessActivityModule` | 默认只监听 `OnBusinessActivityDirty`；确需行值时在设计里说明并单独成条 | `../develop/client/project/docs/ai-core/knowledge/modules/ui-management-system.md`「运营活动监听」 |
+| 7 | 红点 | 存在可领取/可升级状态 | 先判归属：**接入 BusinessActivityModule 的活动红点**走 `RegisterRedPointCallback` + `DirtyRedPoint`；**普通系统功能（非活动）**走 `RedPointModule` 的 `Register` / `Bind`（父子红点）/ `SetHookRecord` / `SetHookProp` / `SetDirty`。两者都要明确 dirty 时机与红点范围 | 活动：`BusinessActivityModule_RedPoint.cs`；系统功能：`RedPointModule/RedPointModule.cs` |
+| 8 | Condition 注册 | 新增条件类型（扩展 `ConditionType`） | 在 `ConditionModule.InitCondition()` 注册：`m_ConditionDic[(int)ConditionType.X] = new ConditionX()` | `checks/client.md` client-012；`ConditionModule.cs` |
+| 9 | Module 注册与数据钩子 | 新增 Module，或监听 Record/属性 | 新 Module 在 `GameLauncher` 注册；每张被监听表列出 Record/属性名、owner、具名回调、绑定时点及下游消费方。初始化登记回调，owner 可用后添加 Hook：主角在主角 Ready，场景在对应场景就绪，plane 在 `OnPlaneObjAdd` 等对象到位时；对象重建/切换的清理与重绑单列，不强制所有 owner 走主角 Ready。使用 `RegisterRecLateHook` / `AddRecLateHook`、`RegisterPropHook` / `AddPropHook` 或实际 API | `checks/client.md` client-014/client-015；`../develop/client/project/docs/ai-core/knowledge/external/soul-engine-client-bridge.md` |
+
+**任务清单写法**：在 tasks.md 的客户端章节开头加一张"接入项确认表"，逐行写 `适用/不适用 + 理由 + 任务编号`；适用项必须在任务列表里有对应条目。
+
+| 接入项 | 结论 | 理由 | 任务编号 |
+|---|---|---|---|
+| UIID + UIDataTable | 适用 | 新增 1 个 Page | 4.6 |
+| LogicStrategy | 适用 | 局内结算走场景策略 | 4.9 |
+| MainArea | 不适用 | 入口只从活动面板进入 | - |
+| ... | ... | ... | ... |
 
 ---
 
@@ -190,12 +219,16 @@ docs/ai-core/rules/coding_standards/README.md
 
 **本项目不维护独立的客户端架构知识库**，架构设计的依据来自客户端工程自己的知识库：
 
+入口相对于 OpenSpec 根目录，不以本规则文件或 `changes/<id>/` 所在目录为基准：
+
 ```
-..\develop\client\project\docs\ai-core\README.md
+../develop/client/project/docs/ai-core/README.md
 ```
 
+下述 `knowledge/`、`rules/` 路径均相对于知识库根目录 `../develop/client/project/docs/ai-core/`。
+
 **生成 4.0 章节前的强制步骤**：
-1. 读取 `docs/ai-core/README.md` 入口，按任务进入 `knowledge/core-index.md`
+1. 读取上述知识库 `README.md` 入口，按任务进入 `knowledge/core-index.md`
 2. 按 `knowledge/modules/index.md` 定位对应系统卡（活动类功能 → `activity-system.md`；纯面板展示 → `ui-management-system.md`；涉及配置表加载 → `table-loading-system.md`）
 3. Read 命中的系统卡，取其中的模块分层、数据流和刷新链路作为架构依据
 4. 编码规范另按本文 §0 读 `rules/coding_standards/README.md`
@@ -244,7 +277,7 @@ XxxModule/ 和 XxxPage/ 目录下的文件清单及各自职责
 - **Cell 层**：只做数据绑定和状态映射，不直接调协议，通过回调转发给 Page/Module 处理
 
 **例外场景**（不适用三层缓存模式，参考知识库或 CodeGraph 现场分析）：
-- 需要每帧/每秒轮询的实时玩法（如物理模拟类），参考 `MarblePlinkoModule` 模式
+- 需要每帧/每秒轮询的实时玩法，参考工程内帧驱动模块（如 `SkillCameraShakeModule`、`BigWorldModule` 的 `OnUpdate` 实现），不要把轮询放进 Page 层
 - 纯展示无后端数据的界面，不需要 Module 层
 
 **CodeGraph 查询模板**：
@@ -409,7 +442,7 @@ TDGrowthFundTable.metaData,
 
 ### 3.2 配置表代码生成任务（自动执行）
 
-**说明**：`output_code_csharp.bat` 是无交互的批处理脚本，可直接通过 Bash 工具调用执行，无需人工介入。
+**说明**：SE 的 `output_code_csharp.bat` 含 `pause`；调用前先核对实际脚本并显式处理交互，按 SE 生成约定执行和验证，不假定无交互。
 
 **标注方式**：
 ```markdown
@@ -521,8 +554,10 @@ void SetData(string rewardStr, CellClaimState state, System.Action onClaim)
 
 | 任务类型 | CodeGraph 查询 | 参考模块 |
 |---------|---------------|---------|
-| 红点注册 | `RegisterRedPointCallback BusinessActivityType` | BusinessActivityModule_RedPoint.cs |
-| 红点刷新 | `DirtyRedPoint` | - |
+| 活动红点注册 | `RegisterRedPointCallback BusinessActivityType` | BusinessActivityModule_RedPoint.cs |
+| 活动红点刷新 | `DirtyRedPoint` | - |
+| 系统功能红点注册 | `RedPointModule Register Bind SetHookRecord SetHookProp` | RedPointModule/RedPointModule.cs |
+| 系统功能红点刷新 | `SetDirty` | - |
 
 ---
 
@@ -546,13 +581,13 @@ void SetData(string rewardStr, CellClaimState state, System.Action onClaim)
    ```
 
 2. **根据 design/config.md 的建议修改 outcode_config.json**：
-   - 文件位置：`..\develop\client\tools\table\table_config\outcode_config.json`
+   - 文件位置：`../develop/client/tools/table/table_config/outcode_config.json`
    - 如果包含 C 或 A 字段 → 添加到 `need_copy` 数组
-   - 如果是动态活动配置 → 添加到 `NeedParseDataMethod` 数组
+   - 如果需要运行时动态解析 → 按设计结论添加到 `NeedParseDataMethod` 数组（SE 专有；与 S/C/A 归属分开判断）
 
 3. **生成代码**：
    ```bash
-   cd ..\develop\client\tools\table
+   cd ../develop/client/tools/table
    双击 output_code_csharp.bat
    ```
 
@@ -563,7 +598,7 @@ void SetData(string rewardStr, CellClaimState state, System.Action onClaim)
 
 **常见错误**：
 - ❌ 手写配置表代码 → 字段遗漏、类型不匹配、ParseData 逻辑错误
-- ❌ 未检查 design/config.md → 不知道应该配置 need_copy 还是 NeedParseDataMethod
+- ❌ 未检查 design/config.md → 不知道应该配置 need_copy
 - ❌ 配置表名拼写错误 → bat 脚本找不到对应的 xlsx 文件，生成失败
 
 **CodeGraph 查询参考**（用于验证生成结果）：
@@ -610,6 +645,6 @@ graph TD
 
 ---
 
-**版本**: v2 (精简版)  
-**最后更新**: 2026-07-22  
+**版本**: v2 (精简版)
+**最后更新**: 2026-10-31（新增 §0.3 框架接入任务包）
 **维护原则**: 只包含"任务拆分的质量标准"，代码模板通过 CodeGraph 查询

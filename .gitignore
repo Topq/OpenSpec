@@ -13,6 +13,17 @@ __pycache__/
 /.workbuddy/
 /.codex/config.toml
 
+# Legacy adapter-local credentials/sessions stay private after deduplication.
+/.agents/skills/*/config.json
+/.agents/skills/*/tmp/
+
 # Generated table exports and inspection output.
 /outputs/monthcard-20260804/
 /outputs/MonthCardGiftPanel_hierarchy.txt
+
+/tmp/
+/output/
+/.ppt-build/
+
+# Local workflow reports, verification evidence, and execution plans.
+/docs/

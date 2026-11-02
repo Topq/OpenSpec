@@ -1,0 +1,6 @@
+interface:
+  display_name: "LR OpenSpec 任务生成"
+  short_description: "执行设计合并门禁并生成验收用例和角色化实施任务"
+  default_prompt: "Use $lr-openspec-tasks to pass the design gate and generate test cases and tasks."
+policy:
+  allow_implicit_invocation: false

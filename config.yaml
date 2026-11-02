@@ -3,8 +3,9 @@ schema: lr-func-dev
 context: |
   这是灵刃游戏的跨端 OpenSpec 根。
 
-  项目目录（相对于 D:\se）：
+  项目目录（均相对于本 OpenSpec 根目录，即 config.yaml 所在目录）：
   - 客户端工程：../develop/client/project
+  - 客户端知识库：../develop/client/project/docs/ai-core
   - 服务端工程：../develop/server/project
   - 策划配置：../design/table/default_ios
 

@@ -1,0 +1,6 @@
+interface:
+  display_name: "LR OpenSpec 设计同步"
+  short_description: "扫描实现差异并生成设计文档与任务清单的同步建议"
+  default_prompt: "Use $lr-openspec-sync to propose design synchronization for the requested change."
+policy:
+  allow_implicit_invocation: false

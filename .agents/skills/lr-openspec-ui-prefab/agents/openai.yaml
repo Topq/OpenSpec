@@ -1,0 +1,6 @@
+interface:
+  display_name: "LR OpenSpec UI Prefab"
+  short_description: "从已验收 React 原型生成并校验 Unity UI Prefab"
+  default_prompt: "Use $lr-openspec-ui-prefab to generate the approved Unity UI Prefab for a change."
+policy:
+  allow_implicit_invocation: false

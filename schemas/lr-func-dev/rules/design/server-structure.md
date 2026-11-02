@@ -1,5 +1,8 @@
 # design-server.md 生成规则（精简版 v2）
 
+> **SE 适配说明**：GodFort/神域防线及其返工频次是 DL 来源案例，不是 SE 当前文件或接口的证据。实际审查先读 SE `config.yaml` 路由的 ai-core，再用 SE CodeGraph/源码复验；来源案例和缺失的历史附件仅作说明，不作为必读依赖或通过依据。
+
+
 > **说明**: 本文档定义 design-server.md 的生成规则。
 > 该文档从 proposal.md 和 specs/*.md 生成，用于服务端工程师技术评审。
 > 
@@ -97,6 +100,16 @@ CodeGraph 查询：OnClientEquipCard OnCustomGetReward protocol handler
 模式 2：CodeGraph 查询 "FirstRechargeModule OnCustomGetReward ERR_COMMON"
 ```
 
+### 1.2.1 错误反馈完整性（阻断性）
+
+**规则**：业务失败（资金不足、CD、上限、满级、资格不满足）必须让客户端能区分原因，不能只写日志或统一返回 `ERR_COMMON_FAIL`。
+
+- 返回可区分错误码，或调用通用错误提示接口（如 `CustomCommonErrorSysInfo`）-> 通过；
+- 只 `LogError` + 统一 `ERR_COMMON_FAIL` -> 违反；
+- 内部一致性错误、防御性分支 -> 豁免。
+
+**依据**：神域防线（GodFort）错误链返工；`changes/sanctum-bulwark/error-completion-contract.md` 记录具体缺口。
+
 ---
 
 ### 1.3 Record 表列枚举命名约定
@@ -169,6 +182,16 @@ CodeGraph 查询：OnClientEquipCard OnCustomGetReward protocol handler
 CodeGraph 查询：#define REC enum COL Record 表定义
 参考文件：define/AIDefine.h, define/AccFirstRechargeDefine.h, define/EquipSuitRecastDefine.h
 ```
+
+### 1.3.1 Record 访问保护（阻断性）
+
+**规则**：
+
+1. `GetRecord` / `FindRecord` 之后必须判存在。本项目实际风格是 `IRecord& + rec.Exist()`，不是指针判空。
+2. 列索引使用 `*Define.h` 中的具名枚举，不写裸数字。
+3. 列数与 `cons/res/struct/*.xml` 的 `cols` 一致；新增列时同步更新枚举。
+
+**依据**：项目既有实现（`GodFortFunc.cpp`、`GodFortClone.cpp` 等）；神域防线曾出现 6 列到 7 列的结构漂移。
 
 ---
 

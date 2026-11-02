@@ -12,7 +12,7 @@
 
 **文件路径**（绝对路径，固定）：
 ```
-..\develop\server\project\AGENTS.md
+../develop/server/project/AGENTS.md
 ```
 
 **读取后判断**：
@@ -23,7 +23,7 @@
 2. 如果只是业务逻辑代码（.cpp/.h 手写部分），跳过第 1 节，直接进入"第 2 节：GBK 编码安全"。
 3. 任何服务端 C/C++ 代码风格问题，参考"第 3 节：服务端编码风格引用"。
 
-**路径来源**：该路径已记录在 `D:\se\openspec\config.yaml` 的 `context` 字段（`../develop/server/project`）。
+**路径来源**：该路径已记录在 `config.yaml` 的 `context` 字段（`../develop/server/project`）。
 
 ---
 
@@ -35,8 +35,8 @@
 - 任务涉及协议号分配 / 协议字段布局
 
 **强制流程**：
-1. 读取 `..\develop\server\project\.agents\skills\lr-generated-code-workflow\SKILL.md`
-2. 读取 `..\develop\server\project\.agents\skills\lr-generated-code-workflow\references\generation-chains.md`
+1. 读取 `../develop/server/project/.agents/skills/lr-generated-code-workflow/SKILL.md`
+2. 读取 `../develop/server/project/.agents/skills/lr-generated-code-workflow/references/generation-chains.md`
 3. 判断目标文件头部是否有 "Generated from ... Do not edit." 标记，或搜索该符号是否能在下列源目录中找到源定义：
    - `cons/res/struct/**/*.xml`
    - `cons/def/configs/*.xml`
@@ -235,7 +235,7 @@ svn revert -R .
 
 **参考文档**：
 ```
-..\develop\server\project\.agents\skills\lr-server-code-style\SKILL.md
+../develop/server/project/.agents/skills/lr-server-code-style/SKILL.md
 ```
 
 **关键规则摘要（详细规则以原文件为准）**：
@@ -257,6 +257,23 @@ svn revert -R .
 
 ---
 
+## 5. 生成期契约自检（阻断性）
+
+与 `lr-openspec-code-review` 对齐、且能在生成期确定的契约自检：P0 项全部纳入，另含生成期成本最低的 P1 项。命中任一项，先修复再返回 `success`。
+
+1. **协议契约**（server-001，P0）：C2S 从 `args.IntVal(1)` 起；S2C 字段数/顺序/类型与本变更 `design.md` 的协议附录一致（独立 protocol-contract.md 如存在则一并核对），可选尾按 `count` 分支；新增协议 ID 同时出现在 `cons/msg/config/client_msg.xml（按 cons/msg/Config.json 与生成链复核）`、`define/ClientCustomDefine.h` 与客户端定义中；处理函数已在 `Init()` 中 `ADD_INT_CUSTOM_HOOK` 注册且未被覆盖。
+2. **配置字段名与列结构**（server-003，P0）：`txt.ReadInt/ReadString` 的字段名与**实际导出 txt 表头**逐字一致；不存在的列、大小写不符都要修。
+3. **Record 访问保护**（server-004，P0）：`GetRecord`/`FindRecord` 后判 `Exist()`；列索引用 `*Define.h` 枚举；列数与 `cons/res/struct/*.xml` 的 `cols` 一致。
+4. **错误反馈完整性**（server-002，P1）：业务失败不能只 `LogError` + `ERR_COMMON_FAIL`，要映射到通用错误码/提示接口。
+
+检查命令：
+
+```bash
+rg -n "args.IntVal|ReadInt|ReadString|GetRecord|FindRecord|Exist\(\)|QueryInt" <本次改动的服务端文件>
+```
+
+---
+
 **版本**: v1（从 lr-openspec-apply/SKILL.md 迁移，新增第 0/1/3 节）
-**最后更新**: 2026-08-06
+**最后更新**: 2026-10-31（新增 §5 生成期契约自检；标题去掉 P0 字样，条目标注检查项等级（P0/P1））
 **维护原则**: 生成器命令、兼容规则以 `develop/server/project/AGENTS.md` 及其路由的 Skill（`lr-generated-code-workflow`、`lr-server-code-style`）为唯一权威来源，本文件只做路由指引，不复制其内容

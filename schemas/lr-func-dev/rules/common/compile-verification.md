@@ -10,7 +10,7 @@
 
 ### 1.1 前置条件
 
-- Unity Editor 已启动（项目路径：`..\develop\client\project`）
+- Unity Editor 已启动（项目路径：`../develop/client/project`）
 - ai-game-developer MCP 插件已连接（http://localhost:22992）
 - 检查方法：调用 `mcp__ai-game-developer__editor-application-get-state`，确认能获取响应
 
@@ -384,8 +384,6 @@ python schemas/lr-func-dev/rules/common/orphan-check.py --scope <模块名>
 
 ### 5.1 apply 阶段（lr-openspec-apply）
 
-### 5.1 apply 阶段（lr-openspec-apply）
-
 **引用位置**：
 - 步骤 6.4.2 客户端增量编译检查 → 本文件第 1 节（Unity MCP 优先）或第 2 节（兜底）
 - 步骤 6.4.3 客户端批量编译验证 → 同 6.4.2
@@ -438,16 +436,16 @@ ui-prefab 已经在用 Unity MCP 做编译状态检测，当前 SKILL.md 的实�
 
 ---
 
-## 5. 设计原则
+## 6. 设计原则
 
-### 5.1 Unity MCP 优于 dotnet build（客户端）
+### 6.1 Unity MCP 优于 dotnet build（客户端）
 
 **原因**：
 1. **覆盖真实依赖图**：Unity MCP 走的是 Unity Editor 自己的编译管线，自动覆盖所有 321 个 asmdef，不需要猜"这个模块归哪个 csproj 管"
 2. **平台条件一致**：Unity 内部编译会处理 `#if UNITY_EDITOR` 等宏定义，`dotnet build` 走的是 MSBuild/Roslyn 独立编译，两边对同一份代码的宏解析可能不同
 3. **无假阴性风险**：`dotnet build Assembly-CSharp.csproj` 只编译默认程序集，独立 asmdef 模块的错误会被漏检
 
-### 5.2 MSBuild 路径枚举是必要兜底（服务端）
+### 6.2 MSBuild 路径枚举是必要兜底（服务端）
 
 **为什么不能封装成一个 bat 脚本**：
 - 服务端现有的 `build.bat` 依赖不可靠的 `%VS2022_HOME%` 环境变量（当前环境未设置）
@@ -459,7 +457,7 @@ ui-prefab 已经在用 Unity MCP 做编译状态检测，当前 SKILL.md 的实�
 - 不依赖环境变量配置（路径探测是幂等的、可预测的）
 - 是没有统一封装脚本时的唯一可靠方案
 
-### 5.3 本文件只定义"怎么验证"，不定义"什么时候验证"
+### 6.3 本文件只定义"怎么验证"，不定义"什么时候验证"
 
 **触发时机由各 SKILL 自行决定**：
 - apply 有编译检查点机制（批次边界触发），适合大规模代码生成

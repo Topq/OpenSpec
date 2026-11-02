@@ -16,10 +16,9 @@ import json
 import sys
 from pathlib import Path
 
-if sys.platform == "win32":
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+if __name__ == "__main__" and sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from tsx_layout_common import TSXNode, TSXParseError, parse_number_tuple, parse_tsx  # noqa: E402
@@ -49,6 +48,7 @@ STRING_ATTRS = {
     "data-layout-group": "layoutGroup",
     "data-layout-child-alignment": "layoutChildAlignment",
     "data-visible": "visible",
+    "data-cell-template": "cellTemplate",
 }
 
 NUMBER_SCALAR_ATTRS = {

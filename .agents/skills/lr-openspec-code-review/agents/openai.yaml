@@ -1,0 +1,6 @@
+interface:
+  display_name: "LR OpenSpec 代码审查"
+  short_description: "按项目框架约定审查实现代码并生成结构化质量报告"
+  default_prompt: "Use $lr-openspec-code-review to review the implementation for the requested change."
+policy:
+  allow_implicit_invocation: false

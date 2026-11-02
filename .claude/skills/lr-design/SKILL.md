@@ -1,6 +1,6 @@
 ---
 name: lr-design
-description: 灵刃策划案 → OpenSpec 变更(proposal + specs delta + React TypeScript 原型 demo)的策划侧闭环流程。只要用户给出飞书策划案链接,或提到"策划案审查""生成原型/demo""建 proposal""提变更""开需求"等意图,即使没有点名 openspec,也应使用本技能。覆盖:下载飞书策划案、完整性审查与对齐、生成带 Unity 组件标识的 React TypeScript 原型、策划验收,再触发 lr-func-dev schema 的 proposal/specs 产物并通过校验。不做 design.md 和 tasks.md(那是开发阶段的事,由同一 schema 的后续产物接手),不回写飞书。
+description: 灵刃策划案 → OpenSpec 变更(proposal + specs delta + React TypeScript 原型 demo)的策划侧闭环流程。只要用户给出飞书策划案链接,或提到"策划案审查""生成原型/demo""建 proposal""提变更""开需求"等意图,即使没有点名 openspec,也应使用本技能。覆盖:下载飞书策划案、完整性审查与对齐、生成带 Unity 组件标识的 React TypeScript 原型、策划验收,再触发 lr-func-dev schema 的 proposal/specs 产物并通过校验。不做 design.md 和 tasks.md(那是开发阶段的事,由同一 schema 的后续产物接手),不回写飞书。 SE UI 优先 ai-game-developer MCP。
 ---
 
 # 灵刃策划案 → OpenSpec 变更(策划侧闭环)
@@ -77,7 +77,7 @@ description: 灵刃策划案 → OpenSpec 变更(proposal + specs delta + React 
 
 ## 执行流程
 
-命令中 `scripts/`、`tmp/`、`references/` 以**本技能目录**为基准,`changes/` 以 **openspec 根**(本技能目录向上两级,即包含 config.yaml 的目录)为基准。执行时使用相对路径,让 Python 脚本内部自行解析(已通过 `Path(__file__).parent` 实现)。
+命令中 `scripts/`、`tmp/`、`references/` 以**本技能目录**为基准,`changes/` 以 **openspec 根**(从本技能目录 `.claude/skills/lr-design/` 向上三级定位,即包含 config.yaml 的目录)为基准。执行时使用相对路径,让 Python 脚本内部自行解析(已通过 `Path(__file__).parent` 实现)。
 
 ### 第 0 步:下载策划案
 
@@ -163,6 +163,14 @@ python scripts/workflow.py --url <飞书链接> --name <功能名>
 **闸门 B**：10项全部在 working.md 中找到明确答案 → 进入第3步生成原型
 
 ---
+
+### UI 参考采集：优先 ai-game-developer MCP（SE）
+
+开始 UI 参考采集前完整读取 OpenSpec 根目录的 `schemas/lr-func-dev/rules/common/unity-ui-mcp.md`。从 `config.yaml` 解析 SE 客户端路径，通过 MCP 的 `Application.dataPath` 确认连接身份，再读取相关真实 Prefab 的层级、组件、字段和必要截图。多个同名 Unity 工程不能只按标题选择。
+
+MCP 可用且身份匹配时，UI 参考查询必须优先用 MCP，不能因本地白名单已有记录或 CLI 更新就跳过。将命中的 Prefab 资产路径、读取的组件/字段及实证结果记入原型交付说明。SE 的字体、贴图和材质以真实资源为准，不引入 DL 默认资源。
+
+MCP 不可用时按公共规则记录错误和未验证范围，才可使用 SE 静态白名单/本地资源作为参考；不能宣称做过实时 Unity 验证。React 原型仍是本阶段交付物，不在此处生成正式 Unity Prefab，也不自动进入 `lr-openspec-ui-prefab`。
 
 ### 第 3 步：生成 React + TypeScript 原型
 

@@ -1,0 +1,6 @@
+interface:
+  display_name: "LR 策划案预检"
+  short_description: "在正式立项前检查策划案完整性并输出缺失问题报告"
+  default_prompt: "Use $lr-plan-precheck to inspect a product plan for missing or conflicting rules."
+policy:
+  allow_implicit_invocation: true

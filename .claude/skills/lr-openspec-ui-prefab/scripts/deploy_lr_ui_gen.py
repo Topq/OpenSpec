@@ -19,7 +19,7 @@ Usage:
   python deploy_lr_ui_gen.py <unity-project-root>
 
 Example:
-  python deploy_lr_ui_gen.py D:/se/develop/client/project
+  python deploy_lr_ui_gen.py ../develop/client/project
 """
 
 from __future__ import annotations

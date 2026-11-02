@@ -1,0 +1,6 @@
+interface:
+  display_name: "LR OpenSpec 技术设计"
+  short_description: "基于已确认需求生成客户端、服务端和配置三端技术设计"
+  default_prompt: "Use $lr-openspec-design to generate the three-part technical design for a change."
+policy:
+  allow_implicit_invocation: false

@@ -8,6 +8,8 @@
 
 ## 1. 前置检查
 
+> SE 专有生成规则：先读 `schemas/lr-func-dev/rules/common/se-config-generation.md`；`need_copy` 与 `NeedParseDataMethod` 分开判断，S 字段动态解析走工具临时转换，源表必须恢复。
+
 在开始任何配置表任务前，先确认 `design/config.md` 包含以下必需信息：
 
 1. 字段定义表的"属性"列（S/C/A 标注）
@@ -56,7 +58,7 @@
   ```
 
 **判断依据**（S/C/A 属性列）：
-- 所有字段都标记为 S（Server-only）→ 需要添加到 `NeedParseDataMethod`
+- 源表为 S 且需要客户端表类动态解析 → 判断并登记 `NeedParseDataMethod`；纯服务端表不自动加入
 - 有任何字段标记为 C 或 A → 添加到 `need_copy`
 
 ---
@@ -107,29 +109,40 @@ diff /tmp/table_before.md5 /tmp/table_after.md5 | grep "^[<>]" | awk '{print $2}
 
 - 检查是否生成 4 个文件（见步骤 3.2 清单）
 - 对比生成的字段列表与 `design/config.md` 的字段定义是否一致
-- **确认字段是否为强类型属性（而非全部落入 `extend`/`TDUniversallySet`）**：如果 xlsx 表头第2行属性标记为 `S`（Server-only），客户端代码生成器（`CheckBelongClient` 逻辑）会跳过该字段的强类型成员生成，即使配置了 `NeedParseDataMethod` 也只会生成空壳 `ParseData` 方法体。凡是客户端需要通过 `DynamicConfigModule` 整表同步在本地强类型访问字段的表（参照 `activity_koi_reward.xlsx` 的做法），属性行必须标记为 `A`，不能标 `S`。design/config.md 里"属性建议"章节的结论不能只看文字描述，要用生成后的 `.cs` 文件反向核实。
+- **确认强类型字段和动态方法**：按 SE 专有生成规则检查 `NeedParseDataMethod`、临时 S→A 包装器、生成字段、`ParseData` 及动态扩展。需要动态解析的 S 表允许保留 S，由工具在生成期间临时转换并恢复；禁止未经核对永久改 A，禁止直接手写生成文件。
 - Extend 目录下的 `TableExtend.cs` 是人工填充骨架，重新生成不会覆盖已有实现——但如果之前手写过 `data.extend.GetInt(...)` 之类的兼容写法，字段变成强类型后要改回 `data.活动id`/`data.xxx` 强类型属性访问，否则会和 Generate 层新增的同名便捷方法（如自动生成的 `GetData(key)`）冲突或不一致。
 - 编译验证由 apply SKILL 主流程统一触发，不在本文件重复描述。
 
 ---
 
-## 4. 配置表接入 DynamicConfigModule 的两级注册（阻断性）
+### 步骤 3.4：生成期契约自检（阻断性）
+
+与 code-review 的 config-001/002 对齐。生成完成后、返回 success 前执行：
+
+1. 生成配置（config-001，P0）：按 SE 专有规则分别核对 `need_copy`、`NeedParseDataMethod`；需要动态解析的表必须登记并验证实际生成的强类型字段、`ParseData` 与动态扩展，不能只检查名单。
+2. 三层一致（config-002，P1）：design/config.md 的 S/C/A 与实际导出 txt 表头、生成类/服务端 READ_FILE 三者一致；重导数据后必须重跑 output_code_csharp.bat，避免 Field removed 与字段恒为 0。
+3. 生成边界：TD 生成文件只读；扩展只写 Extend 目录下的 partial 文件。
+
+---
+
+## 4. DynamicConfigModule 按同步入口核查接入（阻断性）
 
 **背景**：步骤 3.1-3.3（`outcode_config.json` + `output_code_csharp.bat` + `TDXxxTableExtend.cs` + `DynamicConfigModule_Process.cs::RegisterTable`）只完成了**表级注册**——让框架认得这张表怎么解析。这一步做完后编译能通过，`TDXxxTable` 类也存在，很容易被误判为"已经接入完成"。
 
-**但表级注册之外还有活动级注册**：必须有某个业务 Module 实现 `IConfigSyncMethod` 接口，把这张表的表名放进它的 `fileNameList`，并在该 Module 的 `OnInit()` 里调用 `m_DynamicConfigModule.RegisterSyncMethod(this)`。这一步告诉框架"玩家打开这个活动时，需要主动去拉取这些表的数据"。**没有这一步，`TDXxxTable.GetData()` 永远返回空/默认值，且编译和运行时都不会报错**（因为查表接口本身是合法调用，只是数据从未被拉取过）。
+**先确认实际同步入口**：旧活动文件拉取链还需要业务 Module 实现 `IConfigSyncMethod`，在 `fileNameList` / `preFileNameList` 声明按需/提前加载的表，并在 `OnInit()` 调用 `m_DynamicConfigModule.RegisterSyncMethod(this)`。数据库配置同步则核查服务端登记/同步、首次 Ready 的数据库配置请求、版本计划和回包解析，不依赖活动级接口，不能为了接表自造活动类型。两种入口都要保留表级注册和 SE `NeedParseDataMethod` 生成验证。
 
 **要求**：
-- 凡是给活动模块（`XxxModule.cs`）新增了通过 `DynamicConfigModule` 整表同步的配置表，任务清单里必须包含一条独立任务，明确写出：
+- 走旧活动文件拉取链时，除表级注册任务外，必须包含一条独立活动级注册任务，明确写出：
   1. `XxxModule` 声明实现 `IConfigSyncMethod`
-  2. 在 `fileNameList`（或 `preFileNameList`，视是否需要提前加载而定）中列出新增的表名
+  2. 在 `string[] fileNameList`（或 `string[] preFileNameList`，视是否需要提前加载而定）中列出新增的表名；任一名单可为空，不强求两个都非空
   3. 在 `OnInit()` 中调用 `m_DynamicConfigModule.RegisterSyncMethod(this)`
 - 不能把这一步隐含在"创建 XxxModule.cs 骨架"这类笼统任务描述里——必须单独列出，避免被漏掉
+- 走数据库入口时，单列对应服务端登记/同步和客户端请求/解析验证任务，活动级接口标为不适用并说明依据。
 - 代码模板查询：`codegraph explore "IConfigSyncMethod RegisterSyncMethod fileNameList"`，参考模块：`ActivityDrawKOIModule`、`MarblePlinkoModule`
 
 **验证方式**：
-- 编译通过（`XxxModule : ILogicModule, IConfigSyncMethod` 无缺失成员报错）
-- 运行时打开该活动面板后，`TDXxxTable.GetData(id)` 能读到非默认值（而非表级注册验证只看"编译通过、类存在"）
+- 编译通过；旧活动链的 `IConfigSyncMethod` 实现无缺失成员报错，数据库入口不强求该接口
+- 在设计规定的加载时机（提前加载、打开活动或数据库同步完成）检查 `TDXxxTable.GetData(id)` 能读到已知测试行，不仅看“编译通过、类存在”；无配置行的合法空数据场景单独验证
 
 ---
 

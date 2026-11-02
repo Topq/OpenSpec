@@ -70,8 +70,8 @@ Read(changes/{change-id}/reconcile-report.md)  # 若存在
 ### 步骤 2：三层扫描策略
 
 不依赖 implementation-report.md 的完整性，直接扫描代码。从 config.yaml 读取项目路径：
-- 服务端：`D:\se\develop\server\project`（从 context 里的 `../develop/server/project` 解析）
-- 客户端：`D:\se\develop\client\project`（从 context 里的 `../develop/client/project` 解析）
+- 服务端：`../develop/server/project`（从 context 里的 `../develop/server/project` 解析）
+- 客户端：`../develop/client/project`（从 context 里的 `../develop/client/project` 解析）
 
 #### 第 1 层：优先扫描 implementation-report.md 列出的文件
 

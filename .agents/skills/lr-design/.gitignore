@@ -1,5 +1,0 @@
-# 会话临时区与凭据不入库
-tmp/
-config.json
-__pycache__/
-*.pyc

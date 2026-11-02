@@ -10,9 +10,27 @@ parser stand in for a full JSX parser.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
+
+# JSX comments — {/* ... */} — are not markup, but HTMLParser has no idea and
+# happily turns any `<Button>` / `<T>` mentioned inside one into a real node
+# (which then shadows the sibling it was documenting). Strip them before
+# feeding the parser. Non-greedy so adjacent comments stay separate; DOTALL so
+# multi-line comments are covered.
+_JSX_COMMENT_RE = re.compile(r"\{\s*/\*.*?\*/\s*\}", re.DOTALL)
+
+
+def _blank_jsx_comments(raw: str) -> str:
+    """Blank out {/* ... */} comments, keeping newlines so the line/column
+    numbers HTMLParser reports still match the original file."""
+
+    def blank(match: re.Match[str]) -> str:
+        return re.sub(r"[^\n]", " ", match.group(0))
+
+    return _JSX_COMMENT_RE.sub(blank, raw)
 
 VOID_TAGS = {"img", "br", "hr", "input"}
 
@@ -119,7 +137,7 @@ def parse_tsx(source: Path) -> TSXNode:
 
     parser = _TreeBuildingParser(str(source))
     try:
-        parser.feed(raw)
+        parser.feed(_blank_jsx_comments(raw))
         parser.close()
     except Exception as exc:  # HTMLParser surfaces malformed markup as generic errors.
         raise TSXParseError(f"无法解析 {source}: {exc}") from exc

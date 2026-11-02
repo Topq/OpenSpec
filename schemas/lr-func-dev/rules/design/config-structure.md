@@ -303,6 +303,8 @@ CodeGraph 查询：LoadResource READ_FILE txt.ReadInt 配置加载
 
 ### 客户端代码生成配置（强制）
 
+> SE 专有生成规则：先读 `schemas/lr-func-dev/rules/common/se-config-generation.md`；`need_copy` 与 `NeedParseDataMethod` 分开判断，S 字段动态解析走工具临时转换，源表必须恢复。
+
 **outcode_config.json 配置建议**
 
 配置文件位置：`..\develop\client\tools\table\table_config\outcode_config.json`
@@ -327,86 +329,56 @@ CodeGraph 查询：LoadResource READ_FILE txt.ReadInt 配置加载
 **作用**：标记哪些配置表需要生成 `ParseData` 方法（支持动态配置下发）
 
 **配置规则**：
-- ✅ **需要配置**：同时满足以下两个条件
-  1. 配置表用于**运营活动系统**或其他**动态配置系统**
-  2. 支持**运营期间动态调整**（服务端通过协议推送配置到客户端）
+- ✅ **需要配置**：客户端使用生成表类进行运行时动态解析，例如整表动态配置同步；活动、非活动及 S/C/A 各种归属均按实际解析链判断
 - ❌ **不需要配置**：满足以下任一条件
   - 静态配置表（打包时加载，运行时不变）
-  - 非活动类配置（如基础道具表、职业表）
-  - 纯 C 字段表（客户端专属，服务端不推送）
+  - 仅通过独立业务协议传值、未使用生成表类动态解析的配置
+  - 纯静态 C 字段表（客户端专属，无动态解析需求）
 
 **判断流程**：
 1. 确认配置加载方式（见下方"配置加载方式"说明）
-2. 如果是"动态配置"且用于活动系统 → 需要添加到 `NeedParseDataMethod` 数组
-3. 如果是"静态配置"或非活动类 → 不需要配置
+2. 如果需要生成客户端表类的动态解析能力 → 添加到 `NeedParseDataMethod` 数组；纯业务协议直接下发且不用本地表解析的情况不加入
+3. 如果只做静态加载或独立业务协议传值、不使用生成表类动态解析 → 不需要配置；不能以非活动直接豁免
 
 **配置加载方式**（必须明确标注）：
 - [ ] **静态配置**：打包时从 txt 文件加载，运行时不可调整（如怪物属性、技能配置）
 - [ ] **动态配置**：服务端可在运营期间调整，通过协议推送到客户端（如活动奖励档位、任务目标）
 
-**⚠️ 动态配置的服务端实现核查（阻断性）**：
+**⚠️ 动态配置的实际同步入口核查（阻断性）**：
 
-判定为"动态配置"时，**必须执行以下核查**，禁止凭"机制名听起来通用"就假设不需要服务端改动：
+判定为“动态配置”时，先读 `rules/common/se-config-generation.md`（相对于 schema 根目录），对每张表记录实际入口及 SE 源码依据。一个功能涉及多条链时分表、分入口说明；不凭“活动”或“动态”标签选择加载宏。
 
-1. **核查 ConfigSyncModule 注册机制**：
-   ```bash
-   # 查找同类活动模块的配置加载实现
-   grep -rn "READ_SYNC_FILE\|READ_FILE" ../develop/server/project/FsGame/ActivityModule/BusinessActivity/{同类模块}
-   ```
-   
-2. **关键判断依据**：
-   - ✅ 若参考模块使用 `READ_SYNC_FILE` 宏 → 该表已接入 ConfigSyncModule 整表同步
-   - ❌ 若参考模块使用 `READ_FILE` 宏 → **该表未接入同步，客户端收不到推送**
-   
-3. **ConfigSyncModule 机制说明**（必读）：
-   - `ConfigSyncModule` **不是全局自动扫描机制**，只同步显式注册的配置表
-   - 注册方式：配置加载时使用 `READ_SYNC_FILE` 宏（而非 `READ_FILE` 宏）
-   - `READ_SYNC_FILE` 宏内部会调用 `load_sync_file()` → `ConfigSyncModule::LoadFile()` 将表注册进 `mFileMap`
-   - 客户端发 `CLIENT_CUSTOMMSG_PULL_CFGSYNC_FILES` 时，服务端只推送 `mFileMap` 中的表
-   
-4. **核查结果处理**：
-   - 若目标模块**已存在**且使用 `READ_FILE`（未接入同步）：
-     - 在 design/server.md 中新增一节「配置同步接入」，说明需要修改加载宏
-     - 在 tasks/server.md 中生成任务「[Server] 修改配置加载宏以接入 ConfigSyncModule」
-   - 若目标模块**尚未实现**（新建模块）：
-     - 在 design/server.md 的「配置加载」章节明确标注"使用 READ_SYNC_FILE 接入整表同步"
-     - 在 tasks/server.md 中生成任务「[Server] 用 READ_SYNC_FILE 加载配置（接入 ConfigSyncModule）」
-   - 若目标模块已使用 `READ_SYNC_FILE`：
-     - 在 design/server.md 中注明"已接入 ConfigSyncModule，无需修改"
-   
-5. **参考案例**：
-   ```cpp
-   // ✅ 正确示例（BATreasureHuntModule::LoadRoutimeCfg）
-   void BATreasureHuntModule::LoadRoutimeCfg(IKernel* pKernel)
-   {
-       READ_SYNC_FILE(m_routimeCfgPath, UnLoadRoutimeCfg)  // ← 用 READ_SYNC_FILE
-       {
-           // ... 解析逻辑
-       }
-       READ_FILE_END;
-   }
-   
-   // ❌ 错误示例（MixGrowthFundModule::LoadMainCfg 初始版本）
-   void MixGrowthFundModule::LoadMainCfg(IKernel *pKernel)
-   {
-       READ_FILE(m_mainCfgPath, UnloadMainCfg)  // ← 用 READ_FILE，不会同步
-       {
-           // ... 解析逻辑
-       }
-       READ_FILE_END;
-   }
-   ```
+| 实际入口 | 服务端核查 | 客户端核查 | 不得误套的要求 |
+|---|---|---|---|
+| 旧活动文件拉取链 | 目标文件经 `READ_SYNC_FILE` 或已核实的等价注册进入 ConfigSyncModule 的文件同步集合 | `DynamicConfigModule` 表级适配；`IConfigSyncMethod` 活动级注册；按加载时机填写 `fileNameList` / `preFileNameList`，任一可为空 | 不把只有 `READ_FILE` 且无其他同步注册的文件当作已接入此链 |
+| 数据库配置同步 | 实际数据库配置登记、版本及同步发送入口 | 首次主角 Ready 请求、版本计划、`OnDataBaseConfigSync` 回包和对应表的动态解析 | 不强制 `READ_SYNC_FILE`、`IConfigSyncMethod` 或补造活动类型 |
+| 独立业务协议传值 | 权威数据来源、协议字段与发送时机 | 接收、更新及消费路径；若仍使用生成表类动态解析，另查表级适配 | 不因协议携带配置数据就自动要求活动文件同步宏 |
+
+入口无法确认时，在设计中列出待核实项并补齐证据；不得自动选择旧活动链，也不得直接宣称“不需要服务端改动”。
+
+**旧活动文件拉取链的专项检查**（仅命中该入口时执行）：
+
+1. 按 CodeGraph 优先规则查询 SE 同类模块与目标文件的 `READ_SYNC_FILE` / `READ_FILE`、`load_sync_file`、`ConfigSyncModule::LoadFile`；没有索引或工具不可用时再用定点文本查询。
+2. `ConfigSyncModule` 只同步显式注册的文件：`READ_SYNC_FILE` 调用 `load_sync_file()` → `ConfigSyncModule::LoadFile()`，客户端用 `CLIENT_CUSTOMMSG_PULL_CFGSYNC_FILES` 拉取文件同步集合中的表。核对目标文件实际注册，不能仅因参考模块用了该宏就判当前文件已接入。
+3. 目标文件只有 `READ_FILE`、无其他同步注册且确需走本链时，在 design/server.md 说明所需接入，在后续服务端任务中列出对应宏/注册修改；新建文件也按本链设计接入。已注册则注明复用证据，不重复改造。
+
+**数据库配置同步 / 独立协议的专项检查**：
+
+- 按对应入口核对实际 SE 服务端登记/发送与客户端请求/回包处理；数据库路径包含版本计划与表级解析注册，独立协议包含字段及消费方。
+- 缺失哪一段，就在三端设计中说明并在后续任务阶段拆对应任务；不将缺失项一律转换成“改用 READ_SYNC_FILE”。
+- `NeedParseDataMethod` 仍按是否需要生成客户端表类的动态解析能力独立判断，不由入口名称或 S/C/A 归属自动决定。
 
 **禁止的错误假设**：
-- ❌ "ConfigSyncModule 是通用机制，对任意 txt 文件都自动生效"
-- ❌ "活动配置表都会自动同步，不需要服务端改代码"
-- ❌ "只要客户端接入 DynamicConfigModule 就能收到数据"
+- ❌ “ConfigSyncModule 自动扫描任意 txt 文件”或“活动配置天然已接入同步”。
+- ❌ “只要客户端接入 DynamicConfigModule 就能收到数据”。
+- ❌ “所有动态配置都必须使用 READ_SYNC_FILE”，或“看到 READ_FILE 就能断定数据库/独立协议也无法同步”。
 
 **本配置表结论**：
-- [ ] 需要添加到 `NeedParseDataMethod`（动态活动配置）
-- [ ] 不需要添加（静态配置或非活动类）
-- [ ] **服务端已接入 ConfigSyncModule**（已使用 READ_SYNC_FILE）
-- [ ] **服务端需接入 ConfigSyncModule**（当前用 READ_FILE，需改为 READ_SYNC_FILE）
+- [ ] 需要添加到 `NeedParseDataMethod`（需要客户端表类动态解析）
+- [ ] 不需要添加（仅静态加载或独立业务协议，不用生成表类动态解析）
+- 实际同步入口：旧活动文件拉取 / 数据库配置同步 / 独立业务协议（多入口分别说明）
+- 服务端登记/发送与客户端请求/解析的源码依据：[填写路径、入口及结论]
+- 已接入部分与缺失接入任务：[按实际入口填写；不适用写明理由]
 
 **配置示例**：
 ```json

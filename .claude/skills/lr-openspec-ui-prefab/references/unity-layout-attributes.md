@@ -13,7 +13,7 @@
 1. **不用 CSS 表达布局**。位置、尺寸、锚点、Pivot 只能出现在 `data-*` 属性里，且必须是静态字符串字面量（生成器直接读 TSX 源文本，不执行 JSX 表达式）。
 2. **不推断，只显式声明**。每个需要绑定到 C# `[SerializeField]` 字段的节点，必须显式写 `data-field`；生成器不做命名猜测。
 3. **复用优先于新建**。项目已有的框架组件（`LR.SingleScrollView`、`LR.UIRedPointWatcher` 等）通过 `data-prefab-child-path` 引用其内部子节点，不重新拼层级。
-4. **字段驱动，不是原型驱动**。生成 TSX 时以 C# 脚本的 `[SerializeField]` 字段清单为清单式约束——每个字段必须在 TSX 中有且只有一个对应节点，而不是"demo 里有什么就画什么"。demo 里没画出来的状态元素（已购买标记、锁定图标等）如果对应字段存在，也必须补出节点。
+4. **字段驱动，不是原型驱动**。生成 TSX 时以 C# 脚本中可由 FieldBinder 绑定的 `[SerializeField]` 对象引用为约束：普通字段唯一绑定，一维数组按连续下标逐元素绑定。数值、字符串、纯数据类和运行时集合不强求节点。demo 里没画出来的状态元素（已购买标记、锁定图标等）如果对应可绑定引用字段存在，也必须补出节点。
 5. **重叠必须显式声明意图**。校验器默认认为兄弟节点重叠是排版错误，两种例外要显式标注，不能靠校验器猜：
    - **状态互斥的隐藏节点**：`data-visible="false"`（如"已领取"图标盖在"领取"按钮上，两者同一时刻只显示一个）
    - **有意的视觉分层**：`data-overlay="true"`（如背景图铺满整个区域、其上还有标题文字）
@@ -115,9 +115,13 @@
 
 ## 字段完整性约束（本项目特有，UI_React_Spec 没有这条）
 
-生成 TSX 前，先列出目标 C# 脚本的完整 `[SerializeField]` 字段清单。TSX 中每个字段必须能找到唯一对应的 `data-field`，缺一个就是生成失败，不是警告：
+生成 TSX 前，先列出目标 C# 脚本的完整 `[SerializeField]` 字段清单并区分可绑定引用和数据。每个可绑定引用必须有对应 `data-field`，缺一个就是生成失败，不是警告；一维数组使用 `[0]`、`[1]` 等连续下标，不允许重复或空洞：
 
 - 校验器（见 `scripts/validate_unity_layout.py`）强制检查这条，不允许"部分绑定后放行"。
+- 字段名称不要求 `m_` 前缀；允许 `[SerializeField] [Header(...)]` 和 `[SerializeField, HideInInspector]`。绑定类型必须由同节点配方或额外挂载组件提供，不能用文本节点绑定 Button，也不能把配方子节点的组件当作父节点组件。
+- `List<T>`、值类型、纯数据类及 `UnityEngine.Object` 不能显式绑定；当前 FieldBinder 仅支持 GameObject、Transform/RectTransform、Component 及它们的一维数组。运行时 List 由业务代码填充，模板使用独立组件引用。
+- `layoutGroup` 只接受 `Horizontal` / `Vertical`；文本对齐和子节点对齐也校验枚举拼写，TSX 与 JSON 共用枚举约定。
+- 静态检查会解析提供的 C# 自定义继承；未提供完整继承链、已有 Prefab 内容必须通过 MCP 继续验证。生成后重载 Prefab，用 SerializedObject 检查类型、引用非空和逐实例作用域。
 - 如果某个字段在策划 demo（`index.html`）中找不到视觉对应物（比如"已购买标记"这种状态元素，demo 只画了默认态），仍必须在 TSX 里补出对应节点——可以是隐藏状态（`data-visible="false"`）的占位节点，但节点必须存在且携带 `data-field`。
 - 图片资源（`sprite`/`data-image`）允许留空，交给美术后续替换；但节点本身、绑定关系不允许留空。
 

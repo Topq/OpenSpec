@@ -1,0 +1,6 @@
+interface:
+  display_name: "LR OpenSpec 规则沉淀"
+  short_description: "汇总实施与审查发现，生成人工确认的规则沉淀候选"
+  default_prompt: "Use $lr-openspec-rule-candidates to produce rule candidates from the requested change reports."
+policy:
+  allow_implicit_invocation: false

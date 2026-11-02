@@ -10,9 +10,9 @@
 
 进入任何 `[Client]` 任务前，必须先读取客户端工程自己的 AI 协作规范：
 
-**文件路径**（绝对路径，固定）：
+**文件路径**（相对于 OpenSpec 根目录，即 `config.yaml` 所在目录）：
 ```
-..\develop\client\project\AGENTS.md
+../develop/client/project/AGENTS.md
 ```
 
 **读取后处理**：
@@ -20,7 +20,7 @@
 2. 如果涉及生成代码（配置表 C# 代码、UI Prefab 等），遵守该文档里的生成器调用约定，不手写生成产物。
 3. 编码风格、命名规范、禁止操作清单以该文档（及其指向的 `code_review_guide.md`/`code_template_guide.md`）为准，本文件不重复维护。
 
-**路径来源**：该路径已记录在 `D:\se\openspec\config.yaml` 的 `context` 字段（`../develop/client/project`）。
+**路径来源**：客户端工程和知识库根目录均记录在 OpenSpec 根目录 `config.yaml` 的 `context` 字段中。读取前先以该目录解析相对路径，不以本规则文件或 `changes/<id>/` 所在目录为基准。
 
 ---
 
@@ -30,8 +30,10 @@
 
 在开始编写任何客户端代码前，**必须先读取项目知识库入口**，确认是否有相关文档：
 
+以下入口相对于 OpenSpec 根目录；知识库内部的 `knowledge/`、`workflows/`、`rules/` 路径均相对于 `../develop/client/project/docs/ai-core/`。
+
 ```bash
-Read ..\develop\client\project\docs\ai-core\README.md
+Read ../develop/client/project/docs/ai-core/README.md
 ```
 
 **知识库结构**（ai-core 按记忆类型分三目录，先入口后索引，不递归泛读）：
@@ -44,7 +46,7 @@ Read ..\develop\client\project\docs\ai-core\README.md
 
 **根据任务类型，快速定位相关知识卡**（不用全读，重点看命中条目）：
 
-| 任务类型 | 路由 | 对应文档路径（相对 `docs/ai-core/`） |
+| 任务类型 | 路由 | 对应文档路径（相对知识库根目录） |
 |---------|------|-----------------------------------|
 | 生成 Module 骨架 | knowledge 索引 → 对应系统卡 | `knowledge/core-index.md` → `knowledge/modules/index.md`（如 `activity-system.md`、`red-blue-point-system.md`） |
 | 实现 UI 脚本 | knowledge 索引 → UI 系统卡 | `knowledge/modules/index.md` → `knowledge/modules/ui-management-system.md`（UIModule/UIDataTable/Panel 生命周期） |
@@ -80,16 +82,16 @@ Read ..\develop\client\project\docs\ai-core\README.md
 如果任务是"生成 XXXModule.cs 骨架"这类**新建活动业务模块**（`ILogicModule` 实现类，代表某个具体活动/玩法功能，如成长基金、锦鲤抽奖、成长计划），**先查一遍项目里同类模块放在哪，不要凭直觉放进 `BusinessActivityModule/` 目录**：
 
 ```bash
-find /d/se/develop/client/project/Assets/Script/LogicModule/ActivityModule -maxdepth 1 -type d
+find ../develop/client/project/Assets/Script/LogicModule/ActivityModule -maxdepth 1 -type d
 ```
 
-1. **目录位置**：具体活动功能模块统一放在 `LogicModule/ActivityModule/{FuncName}Module/` 下（参照 `ActivityDrawKOIModule`、`DevelopPlanModule`、`MarblePlinkoModule`），**不要**放进 `LogicModule/BusinessActivityModule/` —— 那个目录是通用框架本身（`BusinessActivityModule.cs`、`BusinessActivityDefine.cs` 等），不装具体活动的实现。判断标准：如果这个模块要 `m_Kernel.GetModule<BusinessActivityModule>()` 去调用通用框架的方法（红点、进度、菜单），它就是"框架的使用者"，该放 `ActivityModule/` 下，不是"框架本身"。
+1. **目录位置**：具体活动功能模块统一放在 `LogicModule/ActivityModule/{FuncName}Module/` 下（参照 `ActivityDrawKOIModule`），**不要**放进 `LogicModule/BusinessActivityModule/` —— 那个目录是通用框架本身（`BusinessActivityModule.cs`、`BusinessActivityDefine.cs` 等），不装具体活动的实现。判断标准：如果这个模块要 `m_Kernel.GetModule<BusinessActivityModule>()` 去调用通用框架的方法（红点、进度、菜单），它就是"框架的使用者"，该放 `ActivityModule/` 下，不是"框架本身"。
 
-2. **常量/枚举/数据结构必须独立成 `{FuncName}Define.cs`**，不要塞在 Module 类文件底部或类内部。参照 `MarblePlinkoDefine.cs`、`ActivityDrawKOIDefine.cs` 的结构：
+2. **常量/枚举/数据结构必须独立成 `{FuncName}Define.cs`**，不要塞在 Module 类文件底部或类内部。参照 `ActivityDrawKOIDefine.cs` 的结构：
    ```csharp
    namespace LR
    {
-       public static class {FuncName}Define
+       public class {FuncName}Define
        {
            // 条件类型 / 业务枚举值等常量
            public const int XXX_TYPE_A = 1;
@@ -211,12 +213,12 @@ find /d/se/develop/client/project/Assets/Script/LogicModule/ActivityModule -maxd
 
 **生成客户端 C# 代码前，必须阅读并遵守项目编码规范：**
 
-规范入口（相对于客户端工程根目录）：
+规范入口（相对于 OpenSpec 根目录）：
 ```
-docs/ai-core/rules/coding_standards/README.md
+../develop/client/project/docs/ai-core/rules/coding_standards/README.md
 ```
 
-**必读文件清单**（相对 `docs/ai-core/rules/coding_standards/`，以各原文件为准）：
+**必读文件清单**（相对知识库的 `rules/coding_standards/`，以各原文件为准）：
 - `csharp_spec.md` — 基础编码规范（如 `m_` 前缀、类内成员排列顺序、数据结构类的公有变量原则等）
 - `csharp_safe.md` — 保护规范（如判空、越界、生命周期管理）
 - `csharp_gc.md` — GC 优化规则（如避免 foreach 装箱、慎用 LINQ、字符串拼接用 StringBuilder 等）
@@ -274,6 +276,61 @@ docs/ai-core/rules/coding_standards/README.md
 
 ---
 
+## 5.1 完成前代码规范自检
+
+生成/修改客户端代码后、返回任务结果前，按本次改动文件执行：
+
+1. **业务裸数字**：
+   ```bash
+   grep -nE "case [0-9]+:|(difficulty|propType|result|type|phase|tab)\s*[=!<>]=?\s*[0-9]+" <本次改动的 .cs>
+   ```
+   协议参数数量、`args.GetInt32(index)` 下标、`parts.Length` 可以保留；业务域值必须使用 `{FuncName}Define.cs` 中的枚举或具名常量。
+2. **类内方法顺序**：按 `csharp_spec.md` #21 检查 public 函数 → 系统回调 → 自定义回调 → 私有函数；partial 类每个文件内部检查。
+3. **参考模块**：新增 UI/模块时，确认已参考同类模块的 `Define.cs` 和页面文件结构；不要把单个模块的写法直接推广成通用模板。
+4. **订阅与通知**（对应惯例分类 1）：
+   ```bash
+   rg -n "AddDynamicCommand|AddEventHook|RegisterPropHook|AddPropHook|AddTimer" <本次改动的 .cs>
+   rg -n "OnTableReady|OnKeyTableReady|OnSwitchLanguage|OnBusinessActivity(Changed|LateChanged|Dirty)" <本次改动的 .cs>
+   ```
+   每条新增订阅写出"处理函数读取什么数据、刷新哪块 UI"；同时挂多条 BA 通知时逐条说明消费数据与时序；仅删除无消费点或同一事实导致重复刷新的订阅，不一概删除 LateChanged/详情回包监听。默认只监听 `OnBusinessActivityDirty`（需显示 BA 行值时才补充 Changed/LateChanged）。
+5. **刷新粒度**（对应分类 2）：逐一检查调用整页 `RefreshState()` / `RefreshAll()` 的位置，说明触发源和为什么不局部刷新；重复选择同一项应直接返回；资金/冷却/倒计时只刷可见格子。
+6. **重复状态**（对应分类 4）：
+   ```bash
+   rg -n "m_Is[A-Za-z]*(Ready|Loaded|Registered|Hooked)|m_Has[A-Za-z]*Loaded|Pending|m_[A-Za-z]*Version" <本次改动的 .cs>
+   ```
+   能由 `FindRecord` / `HasProp` / 配置行直接判断的状态不另存；请求未返回前的 pending 表默认不建；每次刷新都 `Clear()` 的缓存字典不保留为字段。
+7. **请求层与校验位置**（对应分类 3）：按 SE 同类实现与实际调用链区分纯发送方法和共享操作入口；前者负责组包，后者即使命名为 `RequestXxx` 也可集中校验活动/场景/余额/CD/资格。校验应覆盖所有调用方，不因方法名强行迁移到 UI；区分“未同步”与“已知不满足”：前者按功能设计等待/重试或交服务端兜底，不能把未知当成功；后者在本地提示并拦截。
+8. **文件结构与设计对齐**（对应分类 6）：对照 `design/client.md`「文件与职责清单」逐个核对实际新增/修改的 `.cs`，多出或缺少的文件要能解释；partial 拆分与该面板复杂度匹配（见 `../develop/client/project/docs/ai-core/knowledge/modules/ui-management-system.md`）。
+9. **框架接入**（对应分类 7）：按 `rules/tasks/client-implementation.md` §0.3 的九项逐条确认"适用/不适用"，适用项在本次改动里能指到具体代码或注册行。
+
+发现规范问题先修复，再返回 `success`；不要带着已知规范问题进入主流程编译和勾选。
+
+### 5.2 生成期契约自检（阻断性）
+
+§5.1 是规范自检；本节是与 `lr-openspec-code-review` 对齐、且能在生成期确定的**契约自检**：P0 项全部纳入，另含生成期成本最低的 P1 项。命中任一项，先修复再返回 `success`；无法在本阶段验证的（如 prefab 尚未生成），必须在任务结果里列出“待绑定 / 待验证”清单，不得静默通过。
+
+1. **UI 框架方法签名**（client-001，P0）：`OnCellUpdated(Transform, int)`、`AttachPage(AbstractPage, Transform)`、`DettachPage`（双 t）。非 override 写法可能编译通过但永不回调。
+2. **协议解析契约**（client-005，P0）：原始协议索引 0；BA `ParamArgs` 索引 `(int)BAActivityInfoIndex.CustomStart`；字段数/类型按 `count` 分支；`int`/`string` 兼容；禁止长整型窄化。
+3. **框架注册完整性**（client-012，P0）：`UIDefine` 枚举 + `UIDataTable.AddPanelData` 两处都齐；走 DynamicConfigModule 的表核查表级注册（SE 的 `outcode_config.json`（含 `NeedParseDataMethod` 判定）+ `RegisterTable`）。仅旧活动文件拉取链要求活动级注册（`IConfigSyncMethod` + 按加载时机填写的 `string[] fileNameList/preFileNameList` + `OnInit` 调 `RegisterSyncMethod(this)`，任一名单可为空）；数据库配置同步按实际服务端入口与数据库请求/回包链验证，不强求活动接口。自定义条件类型在 `ConditionModule.InitCondition` 注册；使用共享枚举（`GameFuncID` / `LEVEL_CLASSS` / `SceneType` / `RedPointType` / `BusinessActivityType`），不自造常量。
+4. **序列化字段与 Prefab 绑定**（client-013，P1）：新增/改名的 `[SerializeField]` 字段列出清单；prefab 已存在则核对同名属性与引用非空；prefab 未生成则写入待绑定清单。
+5. **红点归属**（client-003，P1）：活动入口走 `BusinessActivityModule_RedPoint`；普通系统功能走 `RedPointModule`；`Bind` 父节点只聚合。
+
+```bash
+rg -n "OnCellUpdated|AttachPage|DetachPage|DettachPage|args.GetInt32|args.Count|AddPanelData|RegisterSyncMethod|InitCondition|SerializeField" <本次改动的 .cs>
+```
+
+---
+
+## 6. [Integration] 联调验证
+
+**不生成代码**，输出提示：
+```
+⚠️ Integration 任务是人工验证清单，不支持代码生成。
+   请按 test-cases.md 对应的 TC 逐项验证。
+```
+
+---
+
 **版本**: v1（从 lr-openspec-apply/SKILL.md 迁移）
-**最后更新**: 2026-08-06
-**维护原则**: 只包含"apply 阶段客户端执行"的强制流程；代码模板通过 CodeGraph/知识库索引获取；外部工程规范以 `develop/client/project/AGENTS.md` 为唯一权威来源，本文件不重复维护其内容
+**最后更新**: 2026-10-31（修正失效路径：`AGENTS.md` 位置、知识库 `.claude/` → `.agents/`、`multilanguage.md` → `language.md`；新增阅读包前置门禁与 §5.1 自检 4–9 项；新增 §5.2 生成期契约自检；§5.2 标题去掉 P0 字样，条目标注 client 检查项等级（P0/P1））
+**维护原则**: 只包含"apply 阶段客户端执行"的强制流程；代码模板通过 CodeGraph/知识库索引获取；外部工程规范以 `develop/client/AGENTS.md` 为唯一权威来源，本文件不重复维护其内容

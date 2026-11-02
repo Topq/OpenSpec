@@ -1,0 +1,6 @@
+interface:
+  display_name: "LR 需求设计"
+  short_description: "将飞书策划案闭环转为 OpenSpec 变更与 React 原型"
+  default_prompt: "Use $lr-design to review a product plan and create the approved OpenSpec change."
+policy:
+  allow_implicit_invocation: true

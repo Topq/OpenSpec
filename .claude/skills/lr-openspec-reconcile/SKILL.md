@@ -1,11 +1,11 @@
 ---
 name: lr-openspec-reconcile
-description: 检查设计文档与实际代码的一致性（协议参数、Record结构、配置字段定义），输出差异报告供人工判定
+description: 检查设计文档与实际代码的一致性（协议参数、Record结构、配置字段定义、设计文件清单与实际目录），输出差异报告供人工判定
 ---
 
 # lr-openspec-reconcile
 
-> **职责**: 检查 design.md 与实际代码的一致性，发现"设计 vs 实现"差异，输出报告但不自动判定谁对谁错。
+> **职责**: 检查 design.md 与实际代码的一致性（协议参数、Record 结构、配置字段、文件结构），发现"设计 vs 实现"差异，输出报告但不自动判定谁对谁错。
 > **阶段**: 阶段 10（可选）
 > **依赖**: apply 阶段完成
 
@@ -42,7 +42,7 @@ Read(changes/{change-id}/implementation-report.md)
 ```
 
 **从 design.md 提取检查基线**：
-- 附录 A（客户端设计）：Record 表定义、UI 组件结构
+- 附录 A（客户端设计）：Record 表定义、UI 组件结构、文件与职责清单
 - 附录 B（服务端设计）：Record 表定义、协议处理函数、配置结构体
 - 附录 C（配置设计）：配置表字段定义
 
@@ -292,8 +292,8 @@ Read(../develop/client/tools/table/table_config/outcode_config.json)
 ```
 
 检查：
-- `need_copy` 数组是否包含 `active_fund_main`
-- `NeedParseDataMethod` 数组是否包含（如果是动态活动配置）
+- `need_copy` 数组是否按静态客户端需求配置
+- 按 `schemas/lr-func-dev/rules/common/se-config-generation.md` 检查 SE 专有 `NeedParseDataMethod`：需要动态表类解析时已登记，`ParseData`/强类型字段/动态扩展实际生成；不将纯 S 作为唯一判断条件
 
 #### 4.4 对比结果
 
@@ -317,7 +317,66 @@ Read(../develop/client/tools/table/table_config/outcode_config.json)
 
 ---
 
-### 步骤 5：输出 reconcile-report.md
+### 步骤 5：维度 4 - 设计文件清单与目录结构一致性
+
+**检查内容**：`design/client.md` 的「文件与职责清单」（`client-structure.md` §2.4.1）或 `design.md` 附录 A 的文件列表，与实际 `Assets/Script/` 下的文件是否一致。
+
+**背景**：协议、Record、配置字段都有独立对账，但"设计列 10 个 UI 文件、实际 28 个"这类结构漂移过去没有检查项，会直接导致 apply 遗漏拆分、code-review 找不到目标文件。
+
+#### 5.1 提取设计基线
+
+从 `design/client.md` 的「文件与职责清单」或「UI 设计」章节提取：
+- 计划新增的 `.cs` 文件路径
+- 每个文件的职责（Module 主文件 / `_State` / `_Net` / Page / Panel / Cell）
+
+若 design 没有该章节（旧变更），退化为：从「UI 设计」「模块定义」中提取文件路径，**并在报告中标注"设计缺少文件清单，本次对账不完整"**。
+
+**只取本功能自己的文件**。不做这一步过滤，参考实现会被算成"设计有、实际无"，报出一堆假差异：
+- 只取设计里标注「新增 / 修改」的文件；旧变更的 ASCII 目录树（```text 块）里按同样口径取；
+- 明确写了「不新增 / 不创建 / 不单独新增」的文件名要**排除**——它出现在设计里是说明"为什么不做"；
+- 作为「参考实现 / 参照」提到的其他模块文件（如 `XxxPage.cs`、`ContainerPage.cs`、`TableConfig.cs`）不算基线。
+
+#### 5.2 扫描实际目录
+
+按设计清单里出现的目录逐个扫；再补扫功能常驻的两处：
+
+```bash
+find ../develop/client/project/Assets/Script/LogicModule/{Func}Module -name "*.cs"
+find ../develop/client/project/Assets/Script/UISript/{Func}Panel -name "*.cs"
+```
+
+目录名不确定时，从 `implementation-report.md` 的「生成文件清单」取模块根路径。
+
+设计把入口/区域/容器文件放在功能目录之外时（如 `LogicModule/MainPanelModule/MainArea_{Func}.cs`、`UISript/MainPanel/Container/{Func}/`），**按设计里写的完整路径单独确认**，不能因为不在两个主目录里就判成"实际无"。
+
+#### 5.3 对比与分类
+
+| 差异类型 | 判定 |
+|---|---|
+| 设计有、实际无 | 实施遗漏，或设计过时 → 列差异 |
+| 实际有、设计无 | 实现时按职责拆分 → 列差异，判断是否应回写设计 |
+| 职责描述不一致 | 列差异（如设计写"状态/刷新"，实际承担网络回调） |
+| partial 拆法与设计不同 | 列差异；按 `../develop/client/project/docs/ai-core/knowledge/modules/ui-management-system.md` 的拆分规则判断是否合理，不强制三件套 |
+
+判定原则同前：**只列差异，不判定谁对谁错**。
+
+**输出格式**：
+
+```markdown
+#### 客户端 UI 文件结构
+
+| 文件 | design/client.md | 实际目录 | 职责一致 | 状态 |
+|---|---|---|---|---|
+| XxxPage.cs | 存在 | 存在 | 主文件 + 交互 | 一致 |
+| XxxPage_State.cs | 存在 | 不存在 | - | ⚠️ 实际并入主文件 |
+| XxxDetailCell.cs | 未列出 | 存在 | 天赋连线行 | ⚠️ 设计未列 |
+```
+
+**范围限制**：只对账本功能目录（`LogicModule/{Func}Module*`、`UISript/{Func}*`），不扫描整个 `Assets/Script`，也不把无关的历史文件算进差异。
+
+---
+
+### 步骤 6：输出 reconcile-report.md
 
 ```bash
 Write(changes/{change-id}/reconcile-report.md)
@@ -359,6 +418,12 @@ Write(changes/{change-id}/reconcile-report.md)
 ## 3. 配置表字段定义一致性
 
 [维度 3 的对比表格]
+
+---
+
+## 4. 文件结构一致性
+
+[维度 4 的对比表格]
 
 ---
 
@@ -404,7 +469,7 @@ Write(changes/{change-id}/reconcile-report.md)
 
 ---
 
-### 步骤 6：输出提示
+### 步骤 7：输出提示
 
 ```
 ✅ 已生成一致性检查报告：changes/growth-fund/reconcile-report.md
@@ -457,8 +522,8 @@ codegraph_explore("TDActiveFundMainTable class fields",
 
 **备用方案**（CodeGraph 查询不到时）：
 ```bash
-Grep("args.IntVal", path: "../develop/server/project/SourceModule/ActivityModule/", glob: "*.cpp")
-Grep("#define.*_REC", path: "../develop/server/project/public/Record.h")
+Grep("args.IntVal", path: "../develop/server/project/FsGame/ActivityModule/", glob: "*.cpp")
+Grep("#define.*_REC", path: "../develop/server/project/FsGame/")
 ```
 
 **这不是自动化验证，而是 AI 辅助的一致性检查**。
@@ -505,6 +570,7 @@ Grep("#define.*_REC", path: "../develop/server/project/public/Record.h")
 
 ## 版本信息
 
-**版本**: v1.0  
+**版本**: v1.1
 **创建日期**: 2026-07-24  
+**最后更新**: 2026-10-31（新增维度 4：设计文件清单与目录结构一致性）
 **设计哲学**: AI 只列差异不判定，人工评审后决定回写方向

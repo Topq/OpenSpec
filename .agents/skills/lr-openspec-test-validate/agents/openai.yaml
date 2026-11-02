@@ -1,0 +1,6 @@
+interface:
+  display_name: "LR OpenSpec 测试验证"
+  short_description: "分析测试用例覆盖并生成静态验证与人工测试清单"
+  default_prompt: "Use $lr-openspec-test-validate to assess test coverage for the requested change."
+policy:
+  allow_implicit_invocation: false

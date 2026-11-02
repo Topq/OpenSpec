@@ -79,7 +79,7 @@
 **任务类型**: ⚠️ 手工任务（客户端工程师执行）
 
 **操作步骤**:
-1. 打开终端，进入 `..\develop\client\tools\table\`
+1. 打开终端，进入 `../develop/client/tools/table\`
 2. 执行 `output_code_csharp.bat`
 3. 检查 `Assets/Script/Table/Data/TDActive_growthfund_mainTable.cs` 已生成
 
