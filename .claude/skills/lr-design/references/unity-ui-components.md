@@ -24,6 +24,7 @@
 | `list.scroll` | 常规滚动列表（仅在不需要复用时使用） | `ScrollRect`、`Viewport/Content`、裁剪组件 |
 | `content.async-image` | 异步加载大图（背景图、立绘等大尺寸图片） | `RawImage` 与 `LR.AsyncTexture`，见下方详细配置 |
 | `content.async-icon` | 异步加载图标（非道具类图标，如头像、功能图标等） | `RawImage` 与 `LR.AsyncIcon` |
+| `content.divider` | 分割线（水平/垂直装饰线） | `UnityEngine.UI.Image`，默认 `ty_line_fgx02.png`，`raycastTarget=false` |
 | `content.icon` | UI 状态标识和静态图标（锁定徽章、已领取遮罩、功能入口等），图片在设计期确定 | `UnityEngine.UI.Image`，默认图集贴图，`raycastTarget=false` |
 | `content.item-icon-root` | 运行时 `ItemIconBase.Allocate()` 的挂载点，**专门用于道具展示**（装备、材料、货币等游戏道具） | 空 `GameObject`，只有 `RectTransform`，不挂载任何 UI 组件；字段类型必须是 `Transform` |
 | `content.buff-icon-root` | 运行时 `BuffIcon.Allocate()` 的挂载点，用于动态生成 Buff/Debuff 图标（图标+层数+时间） | 空 `GameObject`，只有 `RectTransform`，不挂载任何 UI 组件；字段类型必须是 `Transform` |

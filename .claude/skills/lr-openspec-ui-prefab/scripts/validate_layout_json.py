@@ -14,19 +14,31 @@ import re
 import sys
 
 from layout_contract import ENUM_VALUES
+from style_profile_contract import STYLE_ROLES
 
 FIELD = re.compile(r"^[A-Za-z_]\w*(?:\[\d+\])?$")
 VECTOR_LENGTHS = {"pos": (2, 3), "size": (2,), "anchors": (4,),
                   "anchorMin": (2,), "anchorMax": (2,), "pivot": (2,),
-                  "layoutPadding": (4,)}
+                  "layoutPadding": (4,), "color": (4,), "imageColor": (4,)}
+IMAGE_TYPE_VALUES = {"Simple", "Sliced", "Tiled", "Filled"}
+FONT_ROOT = "Assets/Resources/Font/"
+STYLE_KEYS = {
+    "fontSize", "color", "font", "fontMaterial", "textAlign", "verticalAlign",
+    "sprite", "imageType", "imageColor", "preserveAspect", "texture",
+}
 
 
-def validate_layout_json(json_path: Path) -> tuple[bool, list[str]]:
+def validate_layout_json(json_path: Path, project_root: Path | None = None) -> tuple[bool, list[str]]:
     errors: list[str] = []
     try:
         data = json.loads(json_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         return False, [f"无法读取 Layout JSON: {exc}"]
+
+    if project_root is not None:
+        project_root = Path(project_root)
+        if not (project_root / "Assets").is_dir():
+            return False, [f"Unity 项目根目录无效（缺少 Assets 目录）: {project_root}"]
 
     catalog_dir = Path(__file__).resolve().parent / "lr_ui_gen" / "ComponentRecipes"
     catalog = {path.stem for path in catalog_dir.glob("*.json")}
@@ -47,6 +59,10 @@ def validate_layout_json(json_path: Path) -> tuple[bool, list[str]]:
             errors.append(f"{path}: 根节点缺少 component 或 Prefab 引用")
         if len(selectors) > 1:
             errors.append(f"{path}: component、prefabChildPath、prefabAssetPath 不能混用")
+        if ("prefabChildPath" in node or "prefabAssetPath" in node) and (STYLE_KEYS & set(node)):
+            errors.append(f"{path}: 样式覆盖不能作用于 Prefab 引用节点")
+        if ("prefabChildPath" in node or "prefabAssetPath" in node) and "role" in node:
+            errors.append(f"{path}: data-role 不能作用于 Prefab 引用节点")
         for key in selectors:
             if not isinstance(node[key], str) or not node[key].strip():
                 errors.append(f"{path}: {key} 必须是非空字符串")
@@ -59,12 +75,51 @@ def validate_layout_json(json_path: Path) -> tuple[bool, list[str]]:
             if (not isinstance(value, list) or len(value) not in lengths
                     or any(type(x) not in (int, float) or not math.isfinite(x) for x in value)):
                 errors.append(f"{path}: {key} 必须是 {lengths} 长度之一的有限数值数组")
-        for key in ("field", "lrComponent", "text", "textStyle", "textAlign", "verticalAlign", "layoutGroup", "layoutChildAlignment", "tag"):
+        for key in ("field", "lrComponent", "text", "textStyle", "textAlign", "verticalAlign",
+                    "layoutGroup", "layoutChildAlignment", "font", "fontMaterial", "sprite",
+                    "imageType", "texture", "role", "tag"):
             if key in node and not isinstance(node[key], str):
                 errors.append(f"{path}: {key} 必须是字符串")
         for key, allowed in ENUM_VALUES.items():
             if key in node and (not isinstance(node[key], str) or node[key] not in allowed):
                 errors.append(f"{path}: {key} 取值非法（允许: {sorted(allowed)}）")
+
+        if "role" in node and (not isinstance(node["role"], str) or node["role"] not in STYLE_ROLES):
+            errors.append(f"{path}: role 取值非法（允许: {sorted(STYLE_ROLES)}）")
+
+        if "textStyle" in node and "component" not in node:
+            errors.append(f"{path}: textStyle 只能与 component 一起使用")
+        if "textStyle" in node and "component" in node:
+            variant = f"{node['component']}-{node['textStyle']}"
+            if variant not in catalog:
+                errors.append(f"{path}: textStyle=\"{node['textStyle']}\" 没有对应的配方变体 {variant}.json")
+
+        if "imageType" in node and (not isinstance(node["imageType"], str)
+                                    or node["imageType"] not in IMAGE_TYPE_VALUES):
+            errors.append(f"{path}: imageType 取值非法（允许: {sorted(IMAGE_TYPE_VALUES)}）")
+
+        if "fontSize" in node:
+            value = node["fontSize"]
+            if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+                errors.append(f"{path}: fontSize 必须是有限正数")
+
+        for key in ("color", "imageColor"):
+            value = node.get(key)
+            if isinstance(value, list) and value and any(
+                    type(x) not in (int, float) or not math.isfinite(x) or x < 0 or x > 1 for x in value):
+                errors.append(f"{path}: {key} 的分量必须是 0..1 的有限数值")
+
+        for key, prefix in (("font", FONT_ROOT), ("fontMaterial", FONT_ROOT),
+                            ("sprite", "Assets/"), ("texture", "Assets/")):
+            value = node.get(key)
+            if isinstance(value, str) and value and not value.startswith(prefix):
+                errors.append(f"{path}: {key} 必须以 {prefix} 开头")
+            if (project_root is not None and isinstance(value, str)
+                    and value.startswith("Assets/")):
+                asset_path = project_root / value.replace("\\", "/")
+                if not asset_path.is_file():
+                    errors.append(f"{path}: {key} 指向的资源不存在: {value}")
+
         if isinstance(node.get("field"), str):
             if any(not FIELD.fullmatch(field.strip()) for field in node["field"].split(",")):
                 errors.append(f"{path}: field 必须是字段名或非负数组下标，可用逗号分隔")
@@ -72,7 +127,7 @@ def validate_layout_json(json_path: Path) -> tuple[bool, list[str]]:
                 for field in node["field"].split(","):
                     field = field.strip()
                     scope.setdefault(field.split("[")[0], []).append(field)
-        for key in ("visible", "cellTemplate"):
+        for key in ("visible", "cellTemplate", "preserveAspect"):
             if key in node and node[key] not in (True, False, "true", "false"):
                 errors.append(f"{path}: {key} 必须为 true/false")
         if "layoutSpacing" in node:
@@ -107,8 +162,10 @@ def validate_layout_json(json_path: Path) -> tuple[bool, list[str]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("layout", type=Path, help="tsx_to_json 输出的节点树 JSON")
+    parser.add_argument("--project-root", type=Path, default=None,
+                        help="Unity 项目根目录；提供时校验 font/fontMaterial/sprite/texture 真实存在")
     args = parser.parse_args()
-    ok, errors = validate_layout_json(args.layout)
+    ok, errors = validate_layout_json(args.layout, project_root=args.project_root)
     if not ok:
         for error in errors:
             print(error, file=sys.stderr)

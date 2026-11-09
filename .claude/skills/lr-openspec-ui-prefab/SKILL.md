@@ -20,6 +20,8 @@ description: 根据已验收的 React 原型 + lr-openspec-apply 生成的 UI �
 1. `changes/<id>/demo/unity/*.tsx`——每个需要生成 Prefab 的脚本对应一个 TSX 文件，字段驱动而非原型驱动（demo 里没画出来的状态元素，只要 C# 里有对应字段，也必须在 TSX 里补出节点）
 2. Unity Prefab（`Assets/Resources/PanelUI/*.prefab`），脚本已挂载、序列化字段已绑定
 
+参考侦察启用时（步骤 2.5）还会额外产出 `changes/<id>/demo/unity/references.json` 和 `reference-notes.md`；没有同功能参考、使用模块级风格档案时（步骤 2.6）还会产出 `ui-style-profile.json` 和 `ui-style-profile.md`。这些是生成过程的审计/参考记录，不是新的设计输入。
+
 ## 为什么不直接生成 Prefab
 
 Web 原型是"视觉稿"，Unity Prefab 需要的是"精确数据"（anchor/pivot/pos/size、组件类型、字段绑定），两者之间存在语义鸿沟——从 HTML/CSS 推断这些数据不可靠（命名映射会断裂、状态元素会被忽略、Cell 复用逻辑推不出来）。
@@ -51,7 +53,7 @@ Web 原型是"视觉稿"，Unity Prefab 需要的是"精确数据"（anchor/pivo
 
 完整读取 OpenSpec 根目录的 `schemas/lr-func-dev/rules/common/unity-ui-mcp.md`。从 `config.yaml` 解析客户端路径，先查 Editor 状态，再用已发现的反射 getter 查询 `Application.dataPath`，确认连接指向 SE 的 `Assets`；不要仅凭窗口标题、Unity 版本或连接成功选择目标。
 
-- MCP 可用且身份匹配：继续走下述 MCP 主流程，并优先用 MCP 读取 SE 参考 Prefab/组件及截图。
+- MCP 可用且身份匹配：继续走下述 MCP 主流程；按步骤 2.5 用 MCP + 参考扫描器读取 SE 参考 Prefab/组件及截图。
 - 正在编译/导入：等待后复查，不为绕过等待切换 CLI。
 - 调用失败、目标不匹配或无法确认身份：记录具体错误，停止 Unity 写入；只有确实没有可用 SE MCP 或能力不支持时，才按“CLI 兜底”处理，不写入其他工程。
 
@@ -93,6 +95,70 @@ MixGrowthFundPage.cs (BaseActivityPage):
 - `.claude/skills/lr-design/references/unity-ui-components.md`——语义组件 ID 白名单
 - [unity-layout-attributes.md](references/unity-layout-attributes.md)——TSX 的 `data-*` 属性规范（本技能专用）
 
+### 步骤 2.5：参考侦察（MCP 可用时强烈建议）
+
+目的：写 TSX 前，用 SE 真实 Prefab 回答两个问题——"同类面板的骨架/命名/组件是什么"、"项目里这个角色通常用什么样式"。参考是翻译词典，不是新设计。
+
+1. **找候选（最多 3 个）**：
+   - 优先复用 `lr-design` 原型交付说明中已记录的参考 Prefab 路径；
+   - 其次在步骤 1.5 的输出目录（同模块/同功能目录）下用 `assets-find`（`t:Prefab`）查找；
+   - 再次从页面类名/change id 提取功能关键词，在 `Assets/Resources/PanelUI` 下搜索；
+   - 只选结构/用途相近的；找不到就跳过，并记录"未做实时参考"。
+
+2. **扫描（只读）**：
+   - 写 `changes/<id>/demo/unity/reference-input.json`：
+     ```json
+     { "prefabPaths": ["Assets/Resources/PanelUI/.../Xxx.prefab"] }
+     ```
+   - 部署扫描器 + 生成器（幂等；扫描器在步骤 6 继续复用）：
+     ```bash
+     python .claude/skills/lr-openspec-ui-prefab/scripts/deploy_lr_ui_gen.py <SE工程根>
+     ```
+   - 调用 `mcp__ai-game-developer__assets-refresh`，轮询 `editor-application-get-state` 直到 `IsCompiling: false`；
+   - 用 `reflection-method-find` 查找 `LRUIPrefabGen.LRPrefabReferenceScanner.Scan`，按返回的真实参数 schema 调 `reflection-method-call`；参数是输入/输出 JSON 的**绝对路径**；
+   - MCP 反射不可用但编辑器可用时，部署后可从 `Tools/LR/Scan Reference Prefabs...` 菜单手动扫描；
+   - 产出 `changes/<id>/demo/unity/references.json`。
+
+3. **写结论**：`changes/<id>/demo/unity/reference-notes.md` 至少包含：
+   - 候选路径、选中项、选择理由；
+   - 结构结论：骨架、命名、组件组合、模板位置；
+   - 样式映射：角色 → `data-lr-style` 或具体覆盖值；
+   - 每个具体覆盖的理由；
+   - 未决/冲突/低置信度项。
+
+4. **置信度**：显式指定 / 同模块目录 / 名称强匹配 → 直接进入步骤 3；候选互相矛盾或只有弱匹配 → 自动选置信度最高的候选，在 `reference-notes.md` 记录冲突与低置信度，继续步骤 3，不打断。
+
+5. **失败处理**：MCP/扫描器不可用、无候选或扫描失败 → 跳过参考侦察，继续用白名单默认值生成；在 `reference-notes.md` 记录失败原因，不阻断。
+
+### 步骤 2.6：模块级风格档案（没有同功能参考时）
+
+参考优先级：**同功能现网 Prefab > 模块级风格档案 > 白名单默认值**。
+
+如果当前需求没有对应的现网 Prefab（新面板/新活动），不要直接套白名单默认值。先从同模块找 3–5 个同类界面，聚合出模块风格档案：
+
+1. 用 `assets-find`（`t:Prefab` + 同模块目录）选 3–5 个同类面板；优先弹窗，尽量覆盖标题、按钮、窗口框。
+2. 写入 `reference-input.json`，用步骤 2.5 的扫描器产出 `references.json`。
+3. 运行：
+   ```bash
+   python .claude/skills/lr-openspec-ui-prefab/scripts/build_ui_style_profile.py \
+     changes/<id>/demo/unity/references.json \
+     --module <模块名> \
+     -o changes/<id>/demo/unity/ui-style-profile.json \
+     --markdown changes/<id>/demo/unity/ui-style-profile.md
+   ```
+4. review `ui-style-profile.md` 的角色值：
+   - `modal.header`（弹窗标题）
+   - `page.title`（页面标题）
+   - `body`（正文/描述）
+   - `price`（价格）
+   - `button.primary` / `button.secondary` / `button.close`
+   - `window.frame`（窗口框）
+   - `divider`（分割线）
+   - `screen`（遮罩）
+5. 在步骤 3 中按角色套用：结构/命名以参考 Prefab 为准；同功能参考与模块档案冲突时，**同功能参考优先**；仍无法解释的差异写进 `reference-notes.md`。
+
+风格档案是参考，不是硬约束；某个角色的高频值不一定适合当前面板，最终以已验收原型 + 同功能参考为准。
+
 ### 步骤 3：生成 TSX
 
 **只为继承 Page 基类的脚本生成 TSX 文件**。产出位置：`changes/<id>/demo/unity/<PageClassName>.tsx`（如 `MixGrowthFundPage.tsx`）。
@@ -108,8 +174,13 @@ MixGrowthFundPage.cs (BaseActivityPage):
 5. **MonoBehaviour 组件字段（如 `MixGrowthFundRewardTierRow m_RewardRowTemplate`）**：在 Page TSX 内部展开该组件的完整层级结构，绑定其所有可绑定引用字段到对应节点，作为运行时实例化的模板。展开时同样要对照 demo 里对应组件（如 `MonthCard.tsx`）的完整视觉内容，不能只按字段清单画节点——字段清单保证"有引用字段的节点不缺"，但 demo 里存在、没有对应字段的纯展示文案（如分组小标题）依然要画出来，不能因为找不到 `data-field` 就跳过。
 6. 视觉细节（图片、圆角、渐变、阴影）不翻译；配套 CSS 只用于基础预览识别。
 7. **只有 Page 根节点**画布尺寸固定 `data-size="(1920, 1080)"`；嵌套组件容器根据实际需要设置尺寸。
+8. **先读步骤 2.5/2.6 的 `reference-notes.md` 和 `ui-style-profile.md`**：结构、命名、组件组合以参考 Prefab 为依据；样式优先同功能参考，其次模块档案的角色值，最后 `data-lr-style`/白名单默认值。模块档案存在时，给标题/正文/价格/按钮/窗口框/分割线/遮罩节点写 `data-role`（角色白名单见 [unity-layout-attributes.md](references/unity-layout-attributes.md)），不要手工抄 profile 数值。
+   - 弹窗底框单独画：在 `Window` 下增加一个 `Bg` 节点，`data-component="content.async-image"` + `data-role="window.frame"`，由 profile 提供 texture；不要把 `Window` 容器本身当作底框。底框节点已有 RawImage 时生成器不会再注入深色占位 Image。
+   - 参考 Prefab 有分割线时，画 `data-component="content.divider"` + `data-role="divider"` 节点；不要省略。
+9. **具体样式覆盖只用于 `data-role`/命名变体表达不了的差异**：使用 `data-font-size`/`data-color`/`data-font`/`data-font-material`/`data-sprite`/`data-image-type`/`data-texture`/`data-image-color`/`data-preserve-aspect` 时，必须在 `reference-notes.md` 记录理由；每个覆盖属性必须能作用于真实组件（见 [unity-layout-attributes.md](references/unity-layout-attributes.md) 的目标规则）。
+10. **`data-color` 优先作为文本颜色**；无文本目标时作为图片颜色别名，`data-name="Screen"` 的遮罩节点映射到生成的 Screen Image 颜色；图片颜色仍优先显式写 `data-image-color`。`data-text-align` 与 `data-vertical-align` 可以单独使用（单独使用时保留另一轴），同时写则两者都覆盖；`RawImage` 支持 `data-image-color` 和 `data-texture`。
 
-发现 React 原型与 C# 字段之间存在结构性矛盾时（比如脚本要三个领取按钮但原型只有一个入口），停止生成，回报使用者，不静默拍板改设计。
+发现 React 原型与 C# 字段之间存在结构性矛盾时（比如脚本要三个领取按钮但原型只有一个入口），停止生成，回报使用者，不静默拍板改设计。参考 Prefab 之间、或参考与原型之间的**样式**冲突无法用命名样式解释时，不阻断：按同功能参考 > 模块档案 > 白名单默认值取舍，并把冲突和取舍写进 `reference-notes.md`。
 
 ### 步骤 4：校验
 
@@ -120,7 +191,7 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/validate_unity_layout.py \
   --csharp <path/to/GrowthFundRewardCell.cs>
 ```
 
-校验内容（详见脚本头部注释）：TSX 解析、`data-name` 唯一性、组件白名单、必填 `data-pos`/`data-size`、枚举值合法性、越界与重叠检测、**字段完整性**（每个可由 FieldBinder 绑定的引用字段都必须有对应 `data-field`；普通字段只能绑定一次，数组逐元素绑定，重复 Cell 在各自作用域检查；数值、字符串及纯数据类不强求 GameObject 绑定）。
+校验内容（详见脚本头部注释）：TSX 解析、`data-name` 唯一性、组件白名单、必填 `data-pos`/`data-size`、枚举值合法性、越界与重叠检测、**字段完整性**（每个可由 FieldBinder 绑定的引用字段都必须有对应 `data-field`；普通字段只能绑定一次，数组逐元素绑定，重复 Cell 在各自作用域检查；数值、字符串及纯数据类不强求 GameObject 绑定），以及**样式覆盖契约**：`data-lr-style` 变体必须存在、文本/图片覆盖必须有可消费目标、字体/材质/贴图路径前缀合法、颜色为 4 个 0..1 分量、`data-text-align`/`data-vertical-align` 成对出现、`RawImage` 只接受 `data-image-color`。
 
 字段解析支持附加/合并 attribute 及非 `m_` 名称。数组在 TSX、JSON 两级均拒绝空洞和重复下标；类型核对只认同节点的配方组件、后处理产物和显式挂载组件，不把子节点组件当作根节点组件。`List<T>` 等不支持的集合显式绑定报错。提供的 C# 可用于解析自定义继承；输出“需 MCP 验证”的项目，以及已有 Prefab 引用、未提供完整继承链的类型，必须在步骤 7.5 核对真实对象类型与磁盘序列化引用，不能将静态通过当成绑定已完成。
 
@@ -129,16 +200,16 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/validate_unity_layout.py \
 ### 步骤 5：转换为 JSON
 
 ```bash
-python .claude/skills/lr-openspec-ui-prefab/scripts/tsx_to_json.py changes/<id>/demo/unity/GrowthFundPanel.tsx
+python .claude/skills/lr-openspec-ui-prefab/scripts/tsx_to_json.py \n  changes/<id>/demo/unity/GrowthFundPanel.tsx \n  --profile changes/<id>/demo/unity/ui-style-profile.json
 ```
 
-只在步骤 4 零错误后执行。转换产物是含 `name` / `component` / `children` 的节点树，与 C# 生成器一致；不是 `rootName/fields/hierarchy` 包装对象。
+只有步骤 2.6 产出 `ui-style-profile.json` 时才传 `--profile`；没有 profile 且 TSX 写了 `data-role` 时转换器会给警告，角色样式不展开。转换产物是含 `name` / `component` / `children` 的节点树，与 C# 生成器一致；不是 `rootName/fields/hierarchy` 包装对象。带 profile 时每个角色节点还会写 `_styleSources`，标明样式键来自 `tsx` 还是 `profile:<role>`；生成器忽略这些元数据，只读已物化的显式键。
 
-随后运行 `python .claude/skills/lr-openspec-ui-prefab/scripts/validate_layout_json.py <输出.json>`；失败先修复，不部署或调用 Unity。
+随后运行 `python .claude/skills/lr-openspec-ui-prefab/scripts/validate_layout_json.py <输出.json> --project-root <unity-project-root>`（项目根取自步骤 1 的 `config.yaml`）；失败先修复，不部署或调用 Unity。提供项目根时，门禁还会检查 `font`/`fontMaterial`/`sprite`/`texture` 指向的资源真实存在，错误目录不再拖到 Unity 里才由自动修复兜底。
 
 ### 步骤 6：部署生成器脚本到 Unity 项目
 
-生成器源码（以 `scripts/lr_ui_gen/` 实际清单为准，包含可选 CLI 入口）平时不常驻 Unity 项目，只在生成 Prefab 时临时部署，用完即删——源码始终以 `.claude/skills/lr-openspec-ui-prefab/scripts/lr_ui_gen/` 为唯一真相源，不要直接改 Unity 项目里部署出来的副本。
+生成器源码（以 `scripts/lr_ui_gen/` 实际清单为准，包含参考扫描器、可选 CLI 入口）平时不常驻 Unity 项目，只在参考侦察/生成 Prefab 时临时部署，用完即删——源码始终以 `.claude/skills/lr-openspec-ui-prefab/scripts/lr_ui_gen/` 为唯一真相源，不要直接改 Unity 项目里部署出来的副本。步骤 2.5 已部署过时，本步骤可跳过或幂等重跑。
 
 ```bash
 python .claude/skills/lr-openspec-ui-prefab/scripts/deploy_lr_ui_gen.py <unity-project-root>
@@ -206,8 +277,11 @@ mcp__ai-game-developer__gameobject-find({
 **验证方法**：
 
 1. 按步骤 1 的清单逐个核对根页面与每个嵌套实例的字段，验证对象类型和引用非空；数组按实际元素核对。保存后通过 `PrefabUtility.LoadPrefabContents` 重新打开，使用 `SerializedObject` 核对实际目标，完成后卸载；不能只看生成日志中的计数或保存前内存对象
+   生成器会自动执行同一检查：`verification-report.json.bindings` 逐个用 `SerializedObject` 核对保存后的字段引用；任何一项失败都会把 `generation-report.status` 置为 `failed`，不再出现“报告 success 但引用丢失”。人工复核仍按本清单执行。
 2. 检查生成日志或校验报告中的绑定数量
 3. 如果数量不一致，回到步骤 1 检查是否漏掉内嵌组件
+
+**自动修复**：字段名拼写错误时，生成器会在目标脚本上找唯一一个类型兼容、名称最相近的字段自动绑定，并在 `generation-report.json` 的 `autoFixes` 和对应 binding 的 `resolvedField` 中记录；存在多个同分候选或没有相似候选时仍然失败，不会静默绑错对象。
 
 **常见问题**：
 - 字段数量少于预期 → 漏掉了某个内嵌组件（如 `XXXCell m_CellTemplate` 指向的 Cell 脚本）
@@ -260,13 +334,31 @@ mcp__ai-game-developer__gameobject-find({
 - ❌ 不应该有 `未找到字段: m_xxx` 警告
 - ⚠️ `未找到组件配方: xxx` 必须核查；涉及本次必需节点时视为阻断，不能仅记录警告后声称生成成功
 
-#### 7.6 截图验证（复杂 UI 优先）
+#### 7.6 与参考 Prefab 对比（步骤 2.5 做过侦察时）
 
-对于复杂 UI，优先使用 `mcp__ai-game-developer__screenshot-isolated` 截图确认视觉效果。
+- **结构**：节点命名、组件集合、模板位置是否与 `reference-notes.md` 的结构结论一致；差异用 `gameobject-find` 核对，warn 不阻断。
+- **样式**：关键角色（标题/按钮/奖励行）的字段是否与参考一致，或是否有 `reference-notes.md` 记录的显式覆盖理由。
+- 不一致且没有理由 → 回到步骤 3 修正或补记录；参考本身弱匹配时，以原型和白名单默认值为准。
 
-**注意**：Prefab 截图只能看到静态结构，动态内容（如列表项）需要运行时才能看到。
+#### 7.7 截图验证（复杂 UI 优先）
 
-#### 7.7 验证结果报告
+`mcp__ai-game-developer__screenshot-isolated` 不能直接截 UI Prefab：UI 只有 `CanvasRenderer`、没有 `Renderer`，无法计算 bounds；Screen Space Overlay 也不会进入相机。可靠做法：
+
+1. 新建一个 additive 临时场景，场景内放一台 Camera（正交，正交尺寸 540，对应 1280×720）。
+2. 实例化目标 Prefab，把根 `Canvas.renderMode` 改为 `ScreenSpaceCamera`，`worldCamera` 指向该相机；根 RectTransform 固定为 1920×1080 以便布局。
+3. 用 `screenshot-camera` 指定该相机截图。
+4. 验证完成后卸载临时场景、删除场景资产和测试 Prefab；不要保存原场景。
+
+**注意**：Prefab 截图只能看到静态结构，动态内容（如列表项）需要运行时才能看到。占位图标、运行时异步加载的图片在截图中显示为默认占位图是预期行为。
+
+#### 7.8 验证结果报告
+
+生成器会在 JSON 同目录写 `generation-report.json`（尝试绑定/实际绑定、错误、自动修复）和 `verification-report.json`（Prefab 实际样式快照：Screen/文本/按钮/RawImage）。先看两个报告的 `status`：`generation-report.json` 为 `failed` 时不得声称生成成功；`verification-report.json` 的文本字号/颜色/字体、按钮 Sprite、Screen Sprite/颜色应与 profile 角色或 TSX 覆盖一致。
+
+`generation-report.json` 的 `autoFixCount`/`autoFixes` 列出本次自动修复：
+- `asset`：原路径不存在，按文件名在 `Assets/` 下找到唯一同名资源（多个同类候选时按目录相近度、AtlasResources 优先、路径长度排序；仍并列则失败并列出候选）。
+- `field`：字段名不存在，在目标脚本上找唯一类型兼容、名称最相近的字段（规范化匹配优先，其次编辑距离；多候选并列则失败）。
+自动修复不是失败，但必须在报告和最终汇报中列出，便于人工抽查。
 
 向用户报告验证结果：
 
@@ -293,7 +385,7 @@ mcp__ai-game-developer__gameobject-find({
 
 ### 步骤 8：清理部署的生成器脚本
 
-生成和验证完成后，删除步骤 6 部署到 Unity 项目的临时脚本，恢复项目干净状态：
+生成和验证完成后，删除步骤 2.5/6 部署到 Unity 项目的临时脚本（参考扫描器与生成器在同一目录），恢复项目干净状态：
 
 ```bash
 python .claude/skills/lr-openspec-ui-prefab/scripts/cleanup_lr_ui_gen.py <unity-project-root>
@@ -343,7 +435,7 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/unity_cli_wrapper.py <SE工�
 
 ## 版本信息
 
-**版本**: v2.1（SE：MCP 优先，CLI 可选兜底）（TSX 中间格式 + 固定程序生成）
+**版本**: v2.5（SE：MCP 优先，CLI 可选兜底）（TSX 中间格式 + 参考侦察 + 角色化 style profile + 命名/节点级样式覆盖 + 资源/字段自动修复 + 保存后字段引用核验 + fail-closed 生成与核验报告）
 
 **依赖 SKILL**：
   - `/lr-design`——生成并验收 Web 原型，产出 `unity-ui-components.md` 白名单
@@ -351,9 +443,10 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/unity_cli_wrapper.py <SE工�
 
 **依赖工具**：
   - ai-game-developer MCP（Unity 插件）
-  - 临时部署的生成器源码：`LRUnityLayoutPrefabGenerator.cs`、`LRUnityLayoutCLI.cs`、`LRComponentRecipes.cs`、`LRFieldBinder.cs`、`ComponentRecipeLoader.cs`（namespace `LRUIPrefabGen`）。唯一真相源是本技能的 `scripts/lr_ui_gen/`，生成时部署至 `Assets/Editor/LRUIPrefabGen/`，完成后按步骤 8 清理。
+  - 临时部署的生成器源码：`LRUnityLayoutPrefabGenerator.cs`、`LRUnityLayoutCLI.cs`、`LRComponentRecipes.cs`、`LRFieldBinder.cs`、`ComponentRecipeLoader.cs`、`LRPrefabReferenceScanner.cs`（namespace `LRUIPrefabGen`）。唯一真相源是本技能的 `scripts/lr_ui_gen/`，参考侦察/生成时部署至 `Assets/Editor/LRUIPrefabGen/`，完成后按步骤 8 清理。
   - `LRUnityLayoutCLI.cs` 是可选 CLI 备用入口；默认仍通过 ai-game-developer MCP 调用生成器。
 
 **依赖配置**：
   - `.claude/skills/lr-design/references/unity-ui-components.md`——组件映射 + 默认样式
   - [references/unity-layout-attributes.md](references/unity-layout-attributes.md)——TSX 布局属性规范
+  - `scripts/build_ui_style_profile.py`——把多个参考 Prefab 的扫描结果聚合为模块级角色化风格档案（步骤 2.6）

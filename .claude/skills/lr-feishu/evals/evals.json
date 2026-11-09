@@ -1,0 +1,19 @@
+{
+  "skill_name": "lr-feishu",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "把 https://lingrengame.feishu.cn/wiki/K7sgwi3dCi5lGxkf40lcdLEqnFf 整理到 C:/tmp/lr-feishu-eval，去掉美术/音效/配置表这些干扰项，输出分章 markdown。",
+      "expected_output": "输出 01~07 分章文件 + README + images；不存在美术、音频、配置表章节。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "用 lr-feishu 整理 evals/fixtures/sample.md 到 C:/tmp/lr-feishu-sample，按设计流程拆分。",
+      "expected_output": "输出 01~07 分章文件；美术/音频/配置表章节被删除，服务端表格行被过滤。",
+      "files": [
+        "evals/fixtures/sample.md"
+      ]
+    }
+  ]
+}

@@ -27,12 +27,15 @@ namespace LRUIPrefabGen
             string style = (string)node?["textStyle"];
             if (!string.IsNullOrEmpty(style))
             {
-                // 尝试加载 componentId-style 配方（如 text.localized-title）
+                // 加载 componentId-style 配方（如 text.localized-title）。
+                // 找不到时必须报错：静默回退基础配方会让样式拼写错误悄悄变成默认样式。
                 var variantRecipe = ComponentRecipeLoader.Get($"{componentId}-{style}");
-                if (variantRecipe != null)
+                if (variantRecipe == null)
                 {
-                    semanticId = $"{componentId}-{style}";
+                    throw new Exception(
+                        $"组件 {componentId} 没有样式变体 \"{style}\"（期望配方 {componentId}-{style}.json）");
                 }
+                semanticId = $"{componentId}-{style}";
             }
 
             // 优先从 JSON 配方加载（新架构）
@@ -45,8 +48,8 @@ namespace LRUIPrefabGen
 
             // 所有白名单语义 ID 现在都有 JSON 配方（见 ComponentRecipes/*.json），
             // 走不到这里就说明 ID 未识别或配方加载失败。
-            Debug.LogWarning($"[LRComponentRecipes] 未识别的语义组件 ID: {componentId}（GameObject={go.name}），只创建了 RectTransform");
-            ApplyLayoutGroup(go, node);
+            throw new Exception(
+                $"[LRComponentRecipes] 未识别的语义组件 ID: {componentId}（GameObject={go.name}），缺少 JSON 配方");
         }
 
         static void ApplyLayoutGroup(GameObject go, JObject node)
@@ -78,6 +81,387 @@ namespace LRUIPrefabGen
             if (!string.IsNullOrEmpty(childAlignment) && Enum.TryParse(childAlignment, out TextAnchor anchor))
             {
                 group.childAlignment = anchor;
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Per-node style overrides (SKILL step 2.5 / unity-layout-attributes.md)
+        //
+        // Precedence: recipe default + postProcess < data-lr-style variant
+        // < these explicit values. Every override must have a real target;
+        // silently ignoring one is the exact bug this feature replaces.
+        // ------------------------------------------------------------------
+
+        static readonly string[] TextOverrideKeys =
+        {
+            "fontSize", "font", "fontMaterial", "textAlign", "verticalAlign",
+        };
+
+        static readonly string[] ImageOverrideKeys =
+        {
+            "sprite", "imageType", "imageColor", "preserveAspect",
+        };
+
+        static bool HasAnyOverride(JObject node, string[] keys)
+        {
+            if (node == null)
+            {
+                return false;
+            }
+            foreach (string key in keys)
+            {
+                if (node[key] != null)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        static void ApplyStyleOverrides(GameObject go, JObject node)
+        {
+            if (node == null)
+            {
+                return;
+            }
+
+            // surface.panel injects the Screen/Scene Image after BuildNode.
+            // Defer mask style keys to PostProcessNode, which runs after
+            // InjectScreenNode and can apply sprite/type/color to the real Image.
+            if (string.Equals(go.name, "Screen", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(go.name, "Scene", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            TextMeshProUGUI tmp = ResolveTextTarget(go);
+            bool hasTextTarget = tmp != null;
+            if (tmp != null)
+            {
+                if (node["fontSize"] != null)
+                {
+                    tmp.fontSize = (float)node["fontSize"];
+                }
+
+                if (node["color"] != null)
+                {
+                    Color? color = ReadColor(node["color"]);
+                    if (!color.HasValue)
+                    {
+                        throw new Exception($"样式覆盖 data-color 必须是 4 个数值: {go.name}");
+                    }
+                    tmp.color = color.Value;
+                }
+
+                string fontPath = (string)node["font"];
+                if (!string.IsNullOrEmpty(fontPath))
+                {
+                    TMP_FontAsset font = LoadAsset<TMP_FontAsset>(fontPath);
+                    if (font == null)
+                    {
+                        throw new Exception($"样式覆盖 data-font 指向的字体不存在: {fontPath} ({go.name})");
+                    }
+                    tmp.font = font;
+                }
+
+                string materialPath = (string)node["fontMaterial"];
+                if (!string.IsNullOrEmpty(materialPath))
+                {
+                    Material material = LoadAsset<Material>(materialPath);
+                    if (material == null)
+                    {
+                        throw new Exception($"样式覆盖 data-font-material 指向的材质不存在: {materialPath} ({go.name})");
+                    }
+                    tmp.fontSharedMaterial = material;
+                }
+
+                string horizontal = (string)node["textAlign"];
+                string vertical = (string)node["verticalAlign"];
+                if (!string.IsNullOrEmpty(horizontal) || !string.IsNullOrEmpty(vertical))
+                {
+                    // Existing prototypes often specify only one axis. Preserve
+                    // the other axis from the recipe/postProcess alignment
+                    // instead of rejecting the TSX or resetting it to a guess.
+                    string effectiveHorizontal = string.IsNullOrEmpty(horizontal)
+                        ? HorizontalOf(tmp.alignment)
+                        : horizontal;
+                    string effectiveVertical = string.IsNullOrEmpty(vertical)
+                        ? VerticalOf(tmp.alignment)
+                        : vertical;
+                    tmp.alignment = ComposeAlignment(effectiveHorizontal, effectiveVertical);
+                }
+            }
+            else if (HasAnyOverride(node, TextOverrideKeys)
+                     || (node["color"] != null
+                         && !string.Equals(go.name, "Screen", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new Exception(
+                    $"样式覆盖属性需要 TextMeshProUGUI（或按钮/页签的单个 Text 子节点）: {go.name}");
+            }
+
+            Image image = go.GetComponent<Image>();
+            if (image != null)
+            {
+                if (node["texture"] != null)
+                {
+                    throw new Exception(
+                        $"Image 节点不支持 data-texture（请使用 content.async-image）: {go.name}");
+                }
+
+                string spritePath = (string)node["sprite"];
+                if (!string.IsNullOrEmpty(spritePath))
+                {
+                    Sprite sprite = LoadAsset<Sprite>(spritePath);
+                    if (sprite == null)
+                    {
+                        throw new Exception($"样式覆盖 data-sprite 指向的图片不存在: {spritePath} ({go.name})");
+                    }
+                    image.sprite = sprite;
+                }
+
+                string imageType = (string)node["imageType"];
+                if (!string.IsNullOrEmpty(imageType))
+                {
+                    Image.Type parsedType;
+                    if (!Enum.TryParse(imageType, true, out parsedType))
+                    {
+                        throw new Exception($"样式覆盖 data-image-type 取值非法: {imageType} ({go.name})");
+                    }
+                    image.type = parsedType;
+                }
+
+                // Legacy/backward-compatible alias: on a node with no text
+                // target, data-color means the image tint. The explicit
+                // data-image-color below still wins when both are present.
+                if (!hasTextTarget && node["color"] != null)
+                {
+                    Color? aliasColor = ReadColor(node["color"]);
+                    if (!aliasColor.HasValue)
+                    {
+                        throw new Exception($"样式覆盖 data-color 必须是 4 个数值: {go.name}");
+                    }
+                    image.color = aliasColor.Value;
+                }
+
+                if (node["imageColor"] != null)
+                {
+                    Color? imageColor = ReadColor(node["imageColor"]);
+                    if (!imageColor.HasValue)
+                    {
+                        throw new Exception($"样式覆盖 data-image-color 必须是 4 个数值: {go.name}");
+                    }
+                    image.color = imageColor.Value;
+                }
+
+                if (node["preserveAspect"] != null)
+                {
+                    bool? preserveAspect = ReadBool(node["preserveAspect"]);
+                    if (!preserveAspect.HasValue)
+                    {
+                        throw new Exception($"样式覆盖 data-preserve-aspect 必须是 true/false: {go.name}");
+                    }
+                    image.preserveAspect = preserveAspect.Value;
+                }
+            }
+            else
+            {
+                RawImage rawImage = go.GetComponent<RawImage>();
+                if (rawImage != null)
+                {
+                    if (!hasTextTarget && node["color"] != null)
+                    {
+                        Color? aliasColor = ReadColor(node["color"]);
+                        if (!aliasColor.HasValue)
+                        {
+                            throw new Exception($"样式覆盖 data-color 必须是 4 个数值: {go.name}");
+                        }
+                        rawImage.color = aliasColor.Value;
+                    }
+
+                    if (node["imageColor"] != null)
+                    {
+                        Color? rawColor = ReadColor(node["imageColor"]);
+                        if (!rawColor.HasValue)
+                        {
+                            throw new Exception($"样式覆盖 data-image-color 必须是 4 个数值: {go.name}");
+                        }
+                        rawImage.color = rawColor.Value;
+                    }
+
+                    string texturePath = (string)node["texture"];
+                    if (!string.IsNullOrEmpty(texturePath))
+                    {
+                        Texture2D texture = LoadAsset<Texture2D>(texturePath);
+                        rawImage.texture = texture;
+                    }
+
+                    if (node["sprite"] != null || node["imageType"] != null || node["preserveAspect"] != null)
+                    {
+                        throw new Exception($"RawImage 节点只支持 data-image-color: {go.name}");
+                    }
+                }
+                else if (HasAnyOverride(node, ImageOverrideKeys) || node["texture"] != null)
+                {
+                    throw new Exception($"样式覆盖属性需要 Image/RawImage 组件: {go.name}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Text overrides land on the node's own TMP, or on its single direct
+        /// TMP child. PostProcessButton creates a child named "Text" and
+        /// PostProcessTabItem creates "Label"; both are covered by the
+        /// "exactly one direct TMP child" rule.
+        /// </summary>
+        static TextMeshProUGUI ResolveTextTarget(GameObject go)
+        {
+            TextMeshProUGUI own = go.GetComponent<TextMeshProUGUI>();
+            if (own != null)
+            {
+                return own;
+            }
+
+            TextMeshProUGUI singleChild = null;
+            int count = 0;
+            foreach (Transform child in go.transform)
+            {
+                TextMeshProUGUI childTmp = child.GetComponent<TextMeshProUGUI>();
+                if (childTmp == null)
+                {
+                    continue;
+                }
+                singleChild = childTmp;
+                count++;
+            }
+            return count == 1 ? singleChild : null;
+        }
+
+        static Color? ReadColor(JToken token)
+        {
+            if (token is JArray array && array.Count >= 4)
+            {
+                return new Color((float)array[0], (float)array[1], (float)array[2], (float)array[3]);
+            }
+            return null;
+        }
+
+        static bool? ReadBool(JToken token)
+        {
+            if (token == null)
+            {
+                return null;
+            }
+            if (token.Type == JTokenType.Boolean)
+            {
+                return (bool)token;
+            }
+            string text = token.ToString();
+            if (bool.TryParse(text, out bool value))
+            {
+                return value;
+            }
+            return null;
+        }
+
+        static TextAlignmentOptions ComposeAlignment(string horizontal, string vertical)
+        {
+            if (vertical == "Middle")
+            {
+                switch (horizontal)
+                {
+                    case "Left": return TextAlignmentOptions.Left;
+                    case "Center": return TextAlignmentOptions.Center;
+                    case "Right": return TextAlignmentOptions.Right;
+                    case "Justified": return TextAlignmentOptions.Justified;
+                }
+            }
+            else if (vertical == "Top")
+            {
+                switch (horizontal)
+                {
+                    case "Left": return TextAlignmentOptions.TopLeft;
+                    case "Center": return TextAlignmentOptions.Top;
+                    case "Right": return TextAlignmentOptions.TopRight;
+                    case "Justified": return TextAlignmentOptions.TopJustified;
+                }
+            }
+            else if (vertical == "Bottom")
+            {
+                switch (horizontal)
+                {
+                    case "Left": return TextAlignmentOptions.BottomLeft;
+                    case "Center": return TextAlignmentOptions.Bottom;
+                    case "Right": return TextAlignmentOptions.BottomRight;
+                    case "Justified": return TextAlignmentOptions.BottomJustified;
+                }
+            }
+            throw new Exception($"无法组合对齐方式: textAlign={horizontal}, verticalAlign={vertical}");
+        }
+
+        static string HorizontalOf(TextAlignmentOptions alignment)
+        {
+            switch (alignment)
+            {
+                case TextAlignmentOptions.TopLeft:
+                case TextAlignmentOptions.Left:
+                case TextAlignmentOptions.BottomLeft:
+                case TextAlignmentOptions.BaselineLeft:
+                case TextAlignmentOptions.MidlineLeft:
+                case TextAlignmentOptions.CaplineLeft:
+                case TextAlignmentOptions.TopFlush:
+                case TextAlignmentOptions.Flush:
+                case TextAlignmentOptions.BottomFlush:
+                case TextAlignmentOptions.BaselineFlush:
+                case TextAlignmentOptions.MidlineFlush:
+                case TextAlignmentOptions.CaplineFlush:
+                    return "Left";
+
+                case TextAlignmentOptions.TopRight:
+                case TextAlignmentOptions.Right:
+                case TextAlignmentOptions.BottomRight:
+                case TextAlignmentOptions.BaselineRight:
+                case TextAlignmentOptions.MidlineRight:
+                case TextAlignmentOptions.CaplineRight:
+                    return "Right";
+
+                case TextAlignmentOptions.TopJustified:
+                case TextAlignmentOptions.Justified:
+                case TextAlignmentOptions.BottomJustified:
+                case TextAlignmentOptions.BaselineJustified:
+                case TextAlignmentOptions.MidlineJustified:
+                case TextAlignmentOptions.CaplineJustified:
+                    return "Justified";
+
+                default:
+                    return "Center";
+            }
+        }
+
+        static string VerticalOf(TextAlignmentOptions alignment)
+        {
+            switch (alignment)
+            {
+                case TextAlignmentOptions.TopLeft:
+                case TextAlignmentOptions.Top:
+                case TextAlignmentOptions.TopRight:
+                case TextAlignmentOptions.TopJustified:
+                case TextAlignmentOptions.TopFlush:
+                case TextAlignmentOptions.TopGeoAligned:
+                    return "Top";
+
+                case TextAlignmentOptions.BottomLeft:
+                case TextAlignmentOptions.Bottom:
+                case TextAlignmentOptions.BottomRight:
+                case TextAlignmentOptions.BottomJustified:
+                case TextAlignmentOptions.BottomFlush:
+                case TextAlignmentOptions.BottomGeoAligned:
+                    return "Bottom";
+
+                default:
+                    // Middle/Left/Center/Right/Justified/Flush/Baseline/Midline/
+                    // Capline and their variants all behave as vertical middle
+                    // for the purposes of this three-value override contract.
+                    return "Middle";
             }
         }
 
@@ -124,8 +508,8 @@ namespace LRUIPrefabGen
             Type type = FindType(fullTypeName);
             if (type == null)
             {
-                Debug.LogWarning($"[LRComponentRecipes] 未找到类型: {fullTypeName}（GameObject={go.name}），跳过挂载");
-                return;
+                throw new Exception(
+                    $"[LRComponentRecipes] 未找到类型: {fullTypeName}（GameObject={go.name}），无法挂载 data-lr-component");
             }
             if (go.GetComponent(type) == null)
             {
@@ -154,12 +538,7 @@ namespace LRUIPrefabGen
 
         static T LoadAsset<T>(string path) where T : UnityEngine.Object
         {
-            T asset = AssetDatabase.LoadAssetAtPath<T>(path);
-            if (asset == null)
-            {
-                Debug.LogWarning($"[LRComponentRecipes] 未找到资源: {path}");
-            }
-            return asset;
+            return LRAssetResolver.Load<T>(path, "ComponentRecipes");
         }
 
         /// <summary>
@@ -192,8 +571,8 @@ namespace LRUIPrefabGen
             Type componentType = FindType(recipe.componentType);
             if (componentType == null)
             {
-                Debug.LogWarning($"[ComponentRecipes] 配方 {recipe.semanticId} 的组件类型未找到: {recipe.componentType}");
-                return;
+                throw new Exception(
+                    $"[ComponentRecipes] 配方 {recipe.semanticId} 的组件类型未找到: {recipe.componentType}（GameObject={go.name}）");
             }
 
             Component mainComponent = null;
@@ -225,8 +604,8 @@ namespace LRUIPrefabGen
                     Type compType = FindType(compSpec.type);
                     if (compType == null)
                     {
-                        Debug.LogWarning($"[ComponentRecipes] 根节点组件类型未找到: {compSpec.type}");
-                        continue;
+                        throw new Exception(
+                            $"[ComponentRecipes] 根节点组件类型未找到: {compSpec.type}（配方={recipe.semanticId}, GameObject={go.name}）");
                     }
 
                     Component comp = AddComponentWithRequirements(go, compType);
@@ -278,8 +657,8 @@ namespace LRUIPrefabGen
                             Type compType = FindType(compSpec.type);
                             if (compType == null)
                             {
-                                Debug.LogWarning($"[ComponentRecipes] 组件类型未找到: {compSpec.type}");
-                                continue;
+                                throw new Exception(
+                                    $"[ComponentRecipes] 子节点组件类型未找到: {compSpec.type}（配方={recipe.semanticId}, 节点={childGo.name}）");
                             }
 
                             Component comp = AddComponentWithRequirements(childGo, compType);
@@ -339,8 +718,8 @@ namespace LRUIPrefabGen
                         PostProcessTabItem(go, node);
                         break;
                     default:
-                        Debug.LogWarning($"[ComponentRecipes] 未知的后处理钩子: {recipe.postProcess}");
-                        break;
+                        throw new Exception(
+                            $"[ComponentRecipes] 配方 {recipe.semanticId} 使用了未知的后处理钩子: {recipe.postProcess}");
                 }
             }
 
@@ -370,6 +749,11 @@ namespace LRUIPrefabGen
             // 注意：这一步之前只在 switch fallback 路径末尾调用，新架构走 ApplyFromRecipe
             // 直接 return，导致所有已配方化组件都无法应用 data-layout-group 等属性，这里补上。
             ApplyLayoutGroup(go, node);
+
+            // 7. 节点级样式覆盖（data-font-size / data-color / data-sprite ...）。
+            // 必须放在 postProcess 之后：按钮的默认 sprite 和自动生成的 Text 子节点
+            // 都是在 PostProcessButton 里写死的，覆盖要在那之后才生效。
+            ApplyStyleOverrides(go, node);
         }
 
         static void ApplyLayoutDefaults(RectTransform rectTransform, LayoutDefaults layout)
@@ -404,28 +788,50 @@ namespace LRUIPrefabGen
             {
                 string propName = kvp.Key;
                 object value = kvp.Value;
+                bool applied = false;
+
+                // "@sibling:" references are resolved by dedicated postProcess
+                // hooks (e.g. PostProcessAsyncTexture binds m_RawImage).
+                if (value is string reference && reference.StartsWith("@sibling:", StringComparison.Ordinal))
+                {
+                    continue;
+                }
 
                 // 优先查找属性
                 var prop = type.GetProperty(propName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
                 if (prop != null && prop.CanWrite)
                 {
                     object convertedValue = ConvertValue(value, prop.PropertyType);
-                    if (convertedValue != null)
+                    if (convertedValue == null)
                     {
-                        prop.SetValue(comp, convertedValue);
-                        continue;
+                        throw new Exception(
+                            $"[ComponentRecipes] 无法转换 {comp.GetType().FullName}.{propName} 的值: {value}");
                     }
+                    prop.SetValue(comp, convertedValue);
+                    applied = true;
                 }
 
                 // Fallback 到字段
-                var field = type.GetField(propName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-                if (field != null)
+                if (!applied)
                 {
-                    object convertedValue = ConvertValue(value, field.FieldType);
-                    if (convertedValue != null)
+                    var field = type.GetField(propName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                    if (field != null)
                     {
+                        object convertedValue = ConvertValue(value, field.FieldType);
+                        if (convertedValue == null)
+                        {
+                            throw new Exception(
+                                $"[ComponentRecipes] 无法转换 {comp.GetType().FullName}.{propName} 的值: {value}");
+                        }
                         field.SetValue(comp, convertedValue);
+                        applied = true;
                     }
+                }
+
+                if (!applied)
+                {
+                    throw new Exception(
+                        $"[ComponentRecipes] 配方属性 {propName} 在 {comp.GetType().FullName} 上不存在（GameObject={comp.gameObject.name}）");
                 }
             }
         }
@@ -469,8 +875,8 @@ namespace LRUIPrefabGen
                     }
                     catch
                     {
-                        Debug.LogWarning($"[ComponentRecipes] 无法将 '{strValue}' 转换为枚举 {targetType.Name}");
-                        return null;
+                        throw new Exception(
+                            $"[ComponentRecipes] 无法将 '{strValue}' 转换为枚举 {targetType.Name}");
                     }
                 }
             }
@@ -503,8 +909,8 @@ namespace LRUIPrefabGen
             }
             catch
             {
-                Debug.LogWarning($"[ComponentRecipes] 无法将 {value.GetType().Name} 转换为 {targetType.Name}");
-                return null;
+                throw new Exception(
+                    $"[ComponentRecipes] 无法将 {value.GetType().Name} 转换为 {targetType.Name}");
             }
         }
 
@@ -518,8 +924,8 @@ namespace LRUIPrefabGen
 
             if (image == null || button == null)
             {
-                Debug.LogWarning($"[ComponentRecipes] PostProcessButton 失败：GameObject {go.name} 缺少 Image 或 Button 组件");
-                return;
+                throw new Exception(
+                    $"[ComponentRecipes] PostProcessButton 失败：GameObject {go.name} 缺少 Image 或 Button 组件");
             }
 
             // 1. 绑定 Button.targetGraphic
@@ -566,13 +972,28 @@ namespace LRUIPrefabGen
         /// </summary>
         static void PostProcessAsyncTexture(GameObject go)
         {
-            var asyncTexture = go.GetComponent(FindType("LR.AsyncTexture"));
+            // content.async-image uses LR.AsyncTexture; content.async-icon uses
+            // LR.AsyncIcon. Both expose the same m_RawImage binding field.
+            Component asyncTexture = null;
+            Type asyncTextureType = FindType("LR.AsyncTexture");
+            if (asyncTextureType != null)
+            {
+                asyncTexture = go.GetComponent(asyncTextureType);
+            }
+            if (asyncTexture == null)
+            {
+                Type asyncIconType = FindType("LR.AsyncIcon");
+                if (asyncIconType != null)
+                {
+                    asyncTexture = go.GetComponent(asyncIconType);
+                }
+            }
             var rawImage = go.GetComponent<RawImage>();
 
             if (asyncTexture == null || rawImage == null)
             {
-                Debug.LogWarning($"[ComponentRecipes] PostProcessAsyncTexture 失败：GameObject {go.name} 缺少 AsyncTexture 或 RawImage 组件");
-                return;
+                throw new Exception(
+                    $"[ComponentRecipes] PostProcessAsyncTexture 失败：GameObject {go.name} 缺少 AsyncTexture/AsyncIcon 或 RawImage 组件");
             }
 
             // 使用 SerializedObject 绑定 m_RawImage 字段
@@ -586,7 +1007,8 @@ namespace LRUIPrefabGen
             }
             else
             {
-                Debug.LogWarning($"[ComponentRecipes] PostProcessAsyncTexture: AsyncTexture 上未找到 m_RawImage 字段");
+                throw new Exception(
+                    $"[ComponentRecipes] PostProcessAsyncTexture: AsyncTexture/AsyncIcon 上未找到 m_RawImage 字段（GameObject={go.name}）");
             }
         }
 
@@ -606,8 +1028,8 @@ namespace LRUIPrefabGen
             }
             else
             {
-                Debug.LogWarning($"[ComponentRecipes] 未找到 LR.SingleScrollView 类型，退化为普通 ScrollRect");
-                scrollRect = go.AddComponent<ScrollRect>();
+                throw new Exception(
+                    $"[ComponentRecipes] 未找到 LR.SingleScrollView 类型（GameObject={go.name}），无法生成列表");
             }
 
             scrollRect.horizontal = false;
@@ -1001,8 +1423,8 @@ namespace LRUIPrefabGen
             }
             else
             {
-                Debug.LogWarning($"[ComponentRecipes] 未找到 LR.ScrollView 类型，退化为普通 ScrollRect");
-                scrollRect = go.AddComponent<ScrollRect>();
+                throw new Exception(
+                    $"[ComponentRecipes] 未找到 LR.ScrollView 类型（GameObject={go.name}），无法生成网格列表");
             }
 
             scrollRect.horizontal = false;

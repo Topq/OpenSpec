@@ -14,7 +14,19 @@ Checks performed (see references/unity-layout-attributes.md):
   - required data-pos / data-size present and parse as numeric tuples on
     every data-component tag (prefab-child-path tags are exempt: they edit
     an existing node, not create one)
-  - data-text-align / data-vertical-align use allowed enum values
+  - data-text-align / data-vertical-align use allowed enum values; either may
+    be supplied alone (the generator preserves the other axis)
+  - data-lr-style points at an existing {component}-{style}.json variant
+  - data-role name is a known profile role and its target matches the role
+    (text roles need a TMP target, button roles need control.button, frame
+    needs RawImage, screen must be named Screen/Scene)
+  - data-texture is only valid on a RawImage target and stays under Assets/
+  - style overrides have a consumable target: text attrs need a TMP on the
+    node or its single direct TMP child; image attrs need Image (RawImage
+    only accepts data-image-color)
+  - data-font/data-font-material stay under Assets/Resources/Font/,
+    data-sprite stays under Assets/, colors are four 0..1 components,
+    data-image-type is a valid Image.Type, data-preserve-aspect is bool
   - no `style=` attribute anywhere
   - child rects stay inside parent rects (best-effort, skipped when parent
     has no usable data-pos/data-size, e.g. layout-group children)
@@ -48,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -66,7 +79,17 @@ from tsx_layout_common import (  # noqa: E402
 )
 
 from layout_contract import ENUM_VALUES
+from style_profile_contract import STYLE_ROLES
 CANVAS_SIZE = (1920, 1080)
+IMAGE_TYPE_VALUES = {"Simple", "Sliced", "Tiled", "Filled"}
+FONT_ROOT = "Assets/Resources/Font/"
+TEXT_STYLE_ATTRS = (
+    "data-font-size", "data-color", "data-font", "data-font-material",
+    "data-text-align", "data-vertical-align",
+)
+IMAGE_STYLE_ATTRS = (
+    "data-sprite", "data-image-type", "data-image-color", "data-preserve-aspect",
+)
 
 CATALOG_ROW_PATTERN = re.compile(r"^\|\s*`([^`]+)`\s*\|")
 SEMANTIC_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$")
@@ -422,6 +445,166 @@ def validate_file(tsx_path: Path, catalog: set[str], errors: list[str], scopes: 
             if value is not None and value not in allowed:
                 errors.append(f"{loc(node)} <{node.tag} data-name={name}> {attr_name} 取值非法: {value}（允许: {sorted(allowed)}）")
 
+        component = node.attr("data-component")
+        style = node.attr("data-lr-style")
+        if style:
+            if not component:
+                errors.append(f"{loc(node)} <{node.tag} data-name={name}> data-lr-style 只能与 data-component 一起使用")
+            else:
+                recipes_dir = Path(__file__).resolve().parent / "lr_ui_gen" / "ComponentRecipes"
+                if not (recipes_dir / f"{component}-{style}.json").is_file():
+                    errors.append(
+                        f"{loc(node)} <{node.tag} data-name={name}> data-lr-style=\"{style}\" 没有对应的配方变体 "
+                        f"{component}-{style}.json"
+                    )
+
+        font_size = node.attr("data-font-size")
+        if font_size is not None:
+            try:
+                parsed_size = float(font_size)
+            except ValueError:
+                errors.append(f"{loc(node)} <{node.tag} data-name={name}> data-font-size 不是数值: {font_size}")
+            else:
+                if not math.isfinite(parsed_size) or parsed_size <= 0 or parsed_size > 200:
+                    errors.append(
+                        f"{loc(node)} <{node.tag} data-name={name}> data-font-size 必须在 (0, 200] 范围内: {font_size}"
+                    )
+
+        for color_attr in ("data-color", "data-image-color"):
+            color_value = node.attr(color_attr)
+            if color_value is None:
+                continue
+            try:
+                color_parts = parse_number_tuple(color_value, str(tsx_path))
+            except TSXParseError as exc:
+                errors.append(str(exc))
+                continue
+            if len(color_parts) != 4 or any(not 0 <= value <= 1 for value in color_parts):
+                errors.append(
+                    f"{loc(node)} <{node.tag} data-name={name}> {color_attr} 必须是 4 个 0..1 的数值: {color_value}"
+                )
+
+        image_type = node.attr("data-image-type")
+        if image_type is not None and image_type not in IMAGE_TYPE_VALUES:
+            errors.append(
+                f"{loc(node)} <{node.tag} data-name={name}> data-image-type 取值非法: {image_type}"
+                f"（允许: {sorted(IMAGE_TYPE_VALUES)}）"
+            )
+
+        preserve_aspect = node.attr("data-preserve-aspect")
+        if preserve_aspect is not None and preserve_aspect.lower() not in ("true", "false"):
+            errors.append(
+                f"{loc(node)} <{node.tag} data-name={name}> data-preserve-aspect 必须是 true/false: {preserve_aspect}"
+            )
+
+        for attr_name, prefix in (
+            ("data-font", FONT_ROOT),
+            ("data-font-material", FONT_ROOT),
+            ("data-sprite", "Assets/"),
+            ("data-texture", "Assets/"),
+        ):
+            asset_path = node.attr(attr_name)
+            if asset_path and not asset_path.startswith(prefix):
+                errors.append(
+                    f"{loc(node)} <{node.tag} data-name={name}> {attr_name} 必须以 {prefix} 开头: {asset_path}"
+                )
+
+        # data-color is primarily the text color, but existing prototypes also
+        # use it on Screen mask nodes (where the generator injects the Image)
+        # and occasionally on image-only nodes. Resolve it against whichever
+        # target exists; data-image-color stays the explicit image form.
+        text_overrides = [
+            attr_name for attr_name in TEXT_STYLE_ATTRS
+            if attr_name != "data-color" and node.attr(attr_name) is not None
+        ]
+        color_override = node.attr("data-color") is not None
+        image_overrides = [attr_name for attr_name in IMAGE_STYLE_ATTRS if node.attr(attr_name) is not None]
+        all_style_overrides = text_overrides + (["data-color"] if color_override else []) + image_overrides
+
+        if all_style_overrides and (node.has_prefab_asset_path() or node.has_prefab_child_path()):
+            errors.append(
+                f"{loc(node)} <{node.tag} data-name={name}> 样式覆盖不能作用于 data-prefab-asset-path/"
+                f"data-prefab-child-path 节点；请修改源 Prefab，或在 TSX 中展开该节点"
+            )
+
+        text_target = node_has_text_target(node)
+        image_target = node_has_image_target(node)
+        is_screen_mask = (name or "").strip().lower() in ("screen", "scene")
+
+        role = node.attr("data-role")
+        if role:
+            if role not in STYLE_ROLES:
+                errors.append(
+                    f"{loc(node)} <{node.tag} data-name={name}> data-role 取值非法: {role}"
+                    f"（允许: {sorted(STYLE_ROLES)}）"
+                )
+            if node.has_prefab_asset_path() or node.has_prefab_child_path():
+                errors.append(
+                    f"{loc(node)} <{node.tag} data-name={name}> data-role 不能作用于 "
+                    f"data-prefab-asset-path/data-prefab-child-path 节点"
+                )
+            if role.startswith("button.") and component != "control.button":
+                errors.append(
+                    f"{loc(node)} <{node.tag} data-name={name}> data-role={role} 需要 data-component=\"control.button\""
+                )
+            elif role in {"modal.header", "page.title", "body", "price"} and text_target is False:
+                errors.append(
+                    f"{loc(node)} <{node.tag} data-name={name}> data-role={role} 需要同节点或单个直接子节点的 TextMeshProUGUI"
+                )
+            elif role == "divider" and image_target not in ("image", None):
+                errors.append(
+                    f"{loc(node)} <{node.tag} data-name={name}> data-role=divider 需要 Image 组件（例如 content.divider）"
+                )
+            elif role == "window.frame" and image_target not in ("raw", None):
+                errors.append(
+                    f"{loc(node)} <{node.tag} data-name={name}> data-role=window.frame 需要 RawImage 组件（例如 content.async-image）"
+                )
+            elif role == "screen":
+                if is_screen_mask is False:
+                    errors.append(
+                        f"{loc(node)} <{node.tag} data-name={name}> data-role=screen 只能用于名为 Screen/Scene 的遮罩节点"
+                    )
+                if image_target is False and component not in ("surface.page", "surface.panel"):
+                    errors.append(
+                        f"{loc(node)} <{node.tag} data-name={name}> data-role=screen 需要 Image 组件或 surface.page/panel 遮罩节点"
+                    )
+
+        texture = node.attr("data-texture")
+        if texture is not None:
+            if image_target == "image":
+                errors.append(
+                    f"{loc(node)} <{node.tag} data-name={name}> data-texture 只能作用于 RawImage（例如 content.async-image）"
+                )
+            elif image_target is False:
+                errors.append(
+                    f"{loc(node)} <{node.tag} data-name={name}> data-texture 需要同节点 RawImage 组件"
+                )
+
+        if text_overrides and text_target is False:
+            errors.append(
+                f"{loc(node)} <{node.tag} data-name={name}> 样式覆盖 {text_overrides} 需要同节点 TextMeshProUGUI，"
+                f"或按钮/页签的单个 Text 子节点"
+            )
+
+        if color_override and text_target is not True and image_target not in ("image", "raw") and not is_screen_mask:
+            errors.append(
+                f"{loc(node)} <{node.tag} data-name={name}> data-color 需要同节点 TextMeshProUGUI、"
+                f"Image/RawImage，或 Screen 遮罩节点"
+            )
+
+        if image_overrides:
+            if image_target is False:
+                errors.append(
+                    f"{loc(node)} <{node.tag} data-name={name}> 样式覆盖 {image_overrides} 需要同节点 Image 或 RawImage 组件"
+                )
+            elif image_target == "raw":
+                unsupported = [attr_name for attr_name in image_overrides if attr_name != "data-image-color"]
+                if unsupported:
+                    errors.append(
+                        f"{loc(node)} <{node.tag} data-name={name}> RawImage 节点只支持 data-image-color，"
+                        f"不支持 {unsupported}"
+                    )
+
         field = node.attr("data-field")
         if field:
             # Keyed by *base* name so array element bindings (m_Cells[0],
@@ -561,6 +744,68 @@ def node_supports_type(node: TSXNode, expected: str, custom_bases: dict[str, str
             known.update(c["type"] for c in child.get("components", []))
     if expected in known or ("." not in expected and any(t.rsplit(".", 1)[-1] == expected for t in known)):
         return False
+    return False
+
+
+def node_has_text_target(node: TSXNode) -> bool | None:
+    """Whether per-node text style overrides have somewhere to land.
+
+    Mirrors LRComponentRecipes.ApplyStyleOverrides: the node itself may carry
+    TextMeshProUGUI (text.localized), or a postProcess may create a single
+    direct Text/Label child (control.button / template.tab-item), or the TSX
+    may declare exactly one direct text.localized child. Prefab references
+    cannot be inspected statically -> None (defer to MCP/generator).
+    """
+
+    if node.has_prefab_asset_path() or node.has_prefab_child_path():
+        return None
+    if not node.has_component():
+        return False
+
+    supported = node_supports_type(node, "TMPro.TextMeshProUGUI", {})
+    if supported is True:
+        return True
+    if supported is None:
+        return None
+
+    component = node.attr("data-component")
+    if component == "template.tab-item":
+        return True
+
+    text_children = [
+        child for child in node.children
+        if (child.attr("data-component") or "").startswith("text.localized")
+    ]
+    if len(text_children) == 1:
+        return True
+
+    # PostProcessButton only auto-creates the Text child when the button node
+    # has no explicit layout-relevant children and carries button text.
+    if component == "control.button" and node.attr("data-text"):
+        if not any(child.is_layout_relevant() for child in node.children):
+            return True
+
+    return False
+
+
+def node_has_image_target(node: TSXNode) -> str | bool | None:
+    """Return "image", "raw", False, or None (cannot decide statically)."""
+
+    if node.has_prefab_asset_path() or node.has_prefab_child_path():
+        return None
+    if not node.has_component():
+        return False
+
+    image = node_supports_type(node, "UnityEngine.UI.Image", {})
+    if image is True:
+        return "image"
+
+    raw_image = node_supports_type(node, "UnityEngine.UI.RawImage", {})
+    if raw_image is True:
+        return "raw"
+
+    if image is None or raw_image is None:
+        return None
     return False
 
 

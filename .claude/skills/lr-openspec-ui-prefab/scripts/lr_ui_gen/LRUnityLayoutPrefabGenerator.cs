@@ -49,6 +49,42 @@ namespace LRUIPrefabGen
         /// </summary>
         public static string GenerateFromLayout(string jsonPath, string prefabPath, string rootScriptTypeName)
         {
+            LRAutoFixLog.Clear();
+            var report = new JObject
+            {
+                ["status"] = "running",
+                ["startedAt"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                ["jsonPath"] = jsonPath,
+                ["prefabPath"] = prefabPath,
+                ["rootScriptTypeName"] = rootScriptTypeName,
+                ["bindings"] = new JArray(),
+                ["errors"] = new JArray(),
+                ["warnings"] = new JArray(),
+            };
+
+            try
+            {
+                string generated = GenerateFromLayoutCore(jsonPath, prefabPath, rootScriptTypeName, report);
+                AppendAutoFixes(report);
+                WriteVerificationReport(jsonPath, generated, report);
+                report["status"] = "success";
+                report["finishedAt"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                WriteGenerationReport(jsonPath, report);
+                return generated;
+            }
+            catch (Exception ex)
+            {
+                report["status"] = "failed";
+                report["finishedAt"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                ((JArray)report["errors"]).Add(ex.ToString());
+                AppendAutoFixes(report);
+                WriteGenerationReport(jsonPath, report);
+                throw;
+            }
+        }
+
+        static string GenerateFromLayoutCore(string jsonPath, string prefabPath, string rootScriptTypeName, JObject report)
+        {
             string jsonText = File.ReadAllText(jsonPath);
             JObject root = JObject.Parse(jsonText);
 
@@ -69,7 +105,7 @@ namespace LRUIPrefabGen
                 Type rootType = FindType(rootScriptTypeName);
                 if (rootType == null)
                 {
-                    Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] 未找到脚本类型: {rootScriptTypeName}，跳过挂载和绑定");
+                    throw new Exception($"[LRUnityLayoutPrefabGenerator] 未找到脚本类型: {rootScriptTypeName}");
                 }
                 else
                 {
@@ -82,7 +118,9 @@ namespace LRUIPrefabGen
             // component if the field's ancestor chain crosses a
             // data-lr-component boundary. See CollectAndBindScoped.
             int boundFieldCount = 0;
-            CollectAndBindScoped(root, rootGo, rootComponent, ref boundFieldCount);
+            JArray bindingLog = (JArray)report["bindings"];
+            CollectAndBindScoped(root, rootGo, rootComponent, ref boundFieldCount, bindingLog);
+            report["boundFieldCount"] = boundFieldCount;
 
             // 结构约定注入（Phase 0.5）：在保存 Prefab 前，对内存中的 GameObject 树进行
             // 约定性结构补全，不依赖 TSX 中的显式声明。
@@ -133,8 +171,393 @@ namespace LRUIPrefabGen
             // 之前用 EditPrefabContentsScope 重新进入编辑模式的方案有状态没对齐，改用这个更直接的路径。
             PostProcessSavedPrefabAsset(root, fullPrefabPath, jsonPath);
 
+            report["boundFieldCount"] = boundFieldCount;
+            report["prefabPath"] = fullPrefabPath;
             Debug.Log($"[LRUnityLayoutPrefabGenerator] 生成完成: {fullPrefabPath}，字段绑定 {boundFieldCount} 个");
             return fullPrefabPath;
+        }
+
+        static string ReportPath(string jsonPath, string fileName)
+        {
+            string dir = Path.GetDirectoryName(jsonPath);
+            if (string.IsNullOrEmpty(dir))
+            {
+                dir = ".";
+            }
+            return Path.Combine(dir, fileName);
+        }
+
+        static void AppendAutoFixes(JObject report)
+        {
+            var autoFixes = new JArray();
+            foreach (LRAutoFix fix in LRAutoFixLog.Snapshot())
+            {
+                autoFixes.Add(new JObject
+                {
+                    ["kind"] = fix.Kind,
+                    ["owner"] = fix.Owner,
+                    ["from"] = fix.From,
+                    ["to"] = fix.To,
+                    ["reason"] = fix.Reason,
+                });
+            }
+            report["autoFixes"] = autoFixes;
+            report["autoFixCount"] = autoFixes.Count;
+        }
+
+        static void WriteGenerationReport(string jsonPath, JObject report)
+        {
+            try
+            {
+                File.WriteAllText(ReportPath(jsonPath, "generation-report.json"), report.ToString());
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] 写入 generation-report.json 失败: {ex.Message}");
+            }
+        }
+
+        static string AssetPath(UnityEngine.Object asset)
+        {
+            return asset == null ? null : AssetDatabase.GetAssetPath(asset);
+        }
+
+        static JArray ColorArray(Color color)
+        {
+            return new JArray(color.r, color.g, color.b, color.a);
+        }
+
+        static string RelativePath(Transform root, Transform target)
+        {
+            var parts = new List<string>();
+            Transform current = target;
+            while (current != null && current != root)
+            {
+                parts.Insert(0, current.name);
+                current = current.parent;
+            }
+            return string.Join("/", parts);
+        }
+
+        static JObject ImageSnapshot(Image image, Transform root)
+        {
+            if (image == null)
+            {
+                return null;
+            }
+            return new JObject
+            {
+                ["path"] = RelativePath(root, image.transform),
+                ["sprite"] = AssetPath(image.sprite),
+                ["type"] = image.type.ToString(),
+                ["color"] = ColorArray(image.color),
+                ["preserveAspect"] = image.preserveAspect,
+                ["raycastTarget"] = image.raycastTarget,
+                ["enabled"] = image.enabled,
+            };
+        }
+
+        static JObject TextSnapshot(TextMeshProUGUI text, Transform root)
+        {
+            return new JObject
+            {
+                ["path"] = RelativePath(root, text.transform),
+                ["text"] = text.text,
+                ["fontSize"] = text.fontSize,
+                ["color"] = ColorArray(text.color),
+                ["font"] = AssetPath(text.font),
+                ["fontMaterial"] = AssetPath(text.fontSharedMaterial),
+                ["alignment"] = text.alignment.ToString(),
+                ["enabled"] = text.enabled,
+            };
+        }
+
+        static JObject RawImageSnapshot(RawImage image, Transform root)
+        {
+            return new JObject
+            {
+                ["path"] = RelativePath(root, image.transform),
+                ["texture"] = AssetPath(image.texture),
+                ["color"] = ColorArray(image.color),
+                ["enabled"] = image.enabled,
+            };
+        }
+
+        static void WriteVerificationReport(string jsonPath, string prefabPath, JObject report)
+        {
+            string reportPath = ReportPath(jsonPath, "verification-report.json");
+            report["verificationReport"] = reportPath;
+
+            GameObject asset = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            if (asset == null)
+            {
+                throw new Exception($"[LRUnityLayoutPrefabGenerator] 无法加载生成的 Prefab 用于核验: {prefabPath}");
+            }
+
+            var verification = new JObject
+            {
+                ["status"] = "success",
+                ["prefabPath"] = prefabPath,
+                ["generatedAt"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                ["errors"] = new JArray(),
+            };
+
+            try
+            {
+                Transform root = asset.transform;
+                verification["rootComponents"] = new JArray(
+                    asset.GetComponents<Component>().Select(component => component.GetType().FullName).ToArray());
+
+                Transform screen = root.Find("Screen") ?? root.Find("Scene");
+                if (screen != null)
+                {
+                    verification["screen"] = ImageSnapshot(screen.GetComponent<Image>(), root);
+                }
+
+                var texts = new JArray();
+                foreach (var text in asset.GetComponentsInChildren<TextMeshProUGUI>(true))
+                {
+                    texts.Add(TextSnapshot(text, root));
+                }
+                verification["texts"] = texts;
+
+                var buttons = new JArray();
+                foreach (var button in asset.GetComponentsInChildren<Button>(true))
+                {
+                    TextMeshProUGUI label = button.GetComponentInChildren<TextMeshProUGUI>(true);
+                    buttons.Add(new JObject
+                    {
+                        ["path"] = RelativePath(root, button.transform),
+                        ["image"] = ImageSnapshot(button.GetComponent<Image>(), root),
+                        ["targetGraphic"] = button.targetGraphic == null
+                            ? null
+                            : RelativePath(root, button.targetGraphic.transform),
+                        ["text"] = label == null ? null : TextSnapshot(label, root),
+                    });
+                }
+                verification["buttons"] = buttons;
+
+                var rawImages = new JArray();
+                foreach (var rawImage in asset.GetComponentsInChildren<RawImage>(true))
+                {
+                    rawImages.Add(RawImageSnapshot(rawImage, root));
+                }
+                verification["rawImages"] = rawImages;
+
+                // Field bindings are the one thing a visual snapshot cannot
+                // prove: reflection may have written a non-serialized field,
+                // or SavePrefabAsset may have dropped the reference. Reload the
+                // asset and check every bound [SerializeField] by path.
+                var bindingChecks = new JArray();
+                int bindingFailures = 0;
+                var bindings = report["bindings"] as JArray;
+                if (bindings != null)
+                {
+                    foreach (JObject binding in bindings.OfType<JObject>())
+                    {
+                        if (!string.Equals((string)binding["status"], "bound", StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        string bindingError;
+                        bool bindingOk = VerifySerializedBinding(asset, binding, out bindingError);
+                        var check = new JObject
+                        {
+                            ["field"] = binding["field"],
+                            ["resolvedField"] = binding["resolvedField"] ?? binding["field"],
+                            ["node"] = binding["node"],
+                            ["component"] = binding["componentType"],
+                            ["status"] = bindingOk ? "ok" : "failed",
+                        };
+                        if (!bindingOk)
+                        {
+                            check["error"] = bindingError;
+                            bindingFailures++;
+                            ((JArray)verification["errors"]).Add(bindingError);
+                        }
+                        bindingChecks.Add(check);
+                    }
+                }
+                verification["bindings"] = bindingChecks;
+                verification["bindingCount"] = bindingChecks.Count;
+                if (bindingFailures > 0)
+                {
+                    verification["status"] = "failed";
+                }
+            }
+            catch (Exception ex)
+            {
+                verification["status"] = "failed";
+                ((JArray)verification["errors"]).Add(ex.ToString());
+            }
+
+            report["verificationStatus"] = verification["status"];
+            try
+            {
+                File.WriteAllText(reportPath, verification.ToString());
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] 写入 verification-report.json 失败: {ex.Message}");
+            }
+
+            if (!string.Equals((string)verification["status"], "success", StringComparison.Ordinal))
+            {
+                throw new Exception(
+                    $"[LRUnityLayoutPrefabGenerator] 生成后核验失败，详见 {reportPath}");
+            }
+        }
+
+        /// <summary>
+        /// Confirms a binding survives serialization: the owner component is
+        /// found on the expected node, FindProperty proves the field is
+        /// serializable (non-serialized fields return null), and the saved
+        /// object reference points at the node recorded during binding.
+        /// </summary>
+        static bool VerifySerializedBinding(GameObject asset, JObject binding, out string error)
+        {
+            error = null;
+            string componentPath = (string)binding["componentPath"];
+            string componentType = (string)binding["componentType"];
+            string expectedPath = (string)binding["path"];
+            string fields = (string)binding["resolvedField"];
+            if (string.IsNullOrEmpty(fields))
+            {
+                fields = (string)binding["field"];
+            }
+
+            if (string.IsNullOrEmpty(componentPath) || string.IsNullOrEmpty(componentType))
+            {
+                error = $"[核验] binding 缺少 componentPath/componentType: {binding}";
+                return false;
+            }
+
+            Transform ownerTransform = FindTransformByPath(asset.transform, componentPath);
+            if (ownerTransform == null)
+            {
+                error = $"[核验] 找不到绑定组件所在节点: {componentPath}";
+                return false;
+            }
+
+            Type type = FindType(componentType);
+            if (type == null)
+            {
+                error = $"[核验] 找不到绑定组件类型: {componentType}";
+                return false;
+            }
+
+            Component owner = ownerTransform.GetComponent(type);
+            if (owner == null)
+            {
+                error = $"[核验] 节点 {componentPath} 上没有组件 {componentType}";
+                return false;
+            }
+
+            var serialized = new SerializedObject(owner);
+            serialized.Update();
+            foreach (string rawField in fields.Split(','))
+            {
+                string field = rawField.Trim();
+                SerializedProperty property = serialized.FindProperty(ToSerializedPropertyPath(field));
+                if (property == null)
+                {
+                    error = $"[核验] {componentType}.{field} 不是可序列化字段（节点={expectedPath}）";
+                    return false;
+                }
+                if (property.propertyType != SerializedPropertyType.ObjectReference)
+                {
+                    error = $"[核验] {componentType}.{field} 不是对象引用字段（节点={expectedPath}）";
+                    return false;
+                }
+
+                UnityEngine.Object value = property.objectReferenceValue;
+                if (value == null)
+                {
+                    error = $"[核验] {componentType}.{field} 保存后引用为空（节点={expectedPath}）";
+                    return false;
+                }
+
+                GameObject referenceGo = value as GameObject;
+                if (referenceGo == null && value is Component componentValue)
+                {
+                    referenceGo = componentValue.gameObject;
+                }
+                if (referenceGo == null)
+                {
+                    error = $"[核验] {componentType}.{field} 引用对象不是 GameObject/Component";
+                    return false;
+                }
+
+                // Compare root-relative paths: SaveAsPrefabAsset names the
+                // prefab root after the output file, which may differ from the
+                // JSON root name recorded during binding.
+                string actualPath = RelativePath(asset.transform, referenceGo.transform);
+                string expectedRelativePath = ToRelativePath(expectedPath, asset.name);
+                if (!string.Equals(actualPath, expectedRelativePath, StringComparison.Ordinal))
+                {
+                    error = $"[核验] {componentType}.{field} 指向 {actualPath}，预期 {expectedRelativePath}";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        static string ToSerializedPropertyPath(string field)
+        {
+            int bracket = field.IndexOf('[');
+            if (bracket < 0 || !field.EndsWith("]", StringComparison.Ordinal))
+            {
+                return field;
+            }
+            string name = field.Substring(0, bracket);
+            string index = field.Substring(bracket + 1, field.Length - bracket - 2);
+            return $"{name}.Array.data[{index}]";
+        }
+
+        static Transform FindTransformByPath(Transform root, string path)
+        {
+            string normalized = (path ?? string.Empty).Replace("\\", "/");
+            if (string.IsNullOrEmpty(normalized) || !normalized.Contains("/"))
+            {
+                // A single segment is the root component (recorded before
+                // SaveAsPrefabAsset possibly renamed the root).
+                return root;
+            }
+
+            string prefix = root.name + "/";
+            if (normalized.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                normalized = normalized.Substring(prefix.Length);
+            }
+            else
+            {
+                // The recorded path carries the JSON root name; drop the first
+                // segment and resolve the remainder from the actual root.
+                normalized = normalized.Substring(normalized.IndexOf('/') + 1);
+            }
+            return root.Find(normalized);
+        }
+
+        static string ToRelativePath(string fullPath, string rootName)
+        {
+            if (string.IsNullOrEmpty(fullPath))
+            {
+                return string.Empty;
+            }
+            string normalized = fullPath.Replace("\\", "/");
+            if (string.Equals(normalized, rootName, StringComparison.Ordinal))
+            {
+                return string.Empty;
+            }
+            int slash = normalized.IndexOf('/');
+            return slash >= 0 ? normalized.Substring(slash + 1) : normalized;
+        }
+
+        static T LoadAsset<T>(string path) where T : UnityEngine.Object
+        {
+            return LRAssetResolver.Load<T>(path, "LRUnityLayoutPrefabGenerator");
         }
 
         static void CreateFolderRecursive(string path)
@@ -259,8 +682,8 @@ namespace LRUIPrefabGen
                 Transform existing = parent.Find(prefabChildPath);
                 if (existing == null)
                 {
-                    Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] data-prefab-child-path 未找到: {prefabChildPath} (parent={parent.name})");
-                    return;
+                    throw new Exception(
+                        $"[LRUnityLayoutPrefabGenerator] data-prefab-child-path 未找到: {prefabChildPath} (parent={parent.name})");
                 }
 
                 string childName = (string)child["name"];
@@ -285,11 +708,7 @@ namespace LRUIPrefabGen
 
         static GameObject InstantiatePrefabAsset(JObject node, Transform parent, JObject parentNode, Vector2 formulaRightPart, string prefabAssetPath)
         {
-            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabAssetPath);
-            if (prefab == null)
-            {
-                throw new Exception($"data-prefab-asset-path 指向的 Prefab 不存在: {prefabAssetPath}");
-            }
+            GameObject prefab = LRAssetResolver.Load<GameObject>(prefabAssetPath, "data-prefab-asset-path");
 
             GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
             string name = (string)node["name"];
@@ -422,7 +841,8 @@ namespace LRUIPrefabGen
         /// each gets bound against its own component instance rather than a
         /// single global dictionary keyed by field name.
         /// </summary>
-        static void CollectAndBindScoped(JObject node, GameObject go, Component currentTarget, ref int boundFieldCount)
+        static void CollectAndBindScoped(
+            JObject node, GameObject go, Component currentTarget, ref int boundFieldCount, JArray bindingLog)
         {
             string lrComponent = (string)node["lrComponent"];
             Component scopeTarget = currentTarget;
@@ -432,14 +852,15 @@ namespace LRUIPrefabGen
                 // the tree; fetch the same instance here so bindings land on
                 // this node's own script rather than the enclosing scope's.
                 Type scopeType = FindType(lrComponent);
-                if (scopeType != null)
+                if (scopeType == null)
                 {
-                    scopeTarget = go.GetComponent(scopeType);
-                    if (scopeTarget == null)
-                    {
-                        Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] {lrComponent} 组件未挂载到 {go.name}，字段绑定将回退到外层作用域");
-                        scopeTarget = currentTarget;
-                    }
+                    throw new Exception($"[LRUnityLayoutPrefabGenerator] 未找到嵌套脚本类型: {lrComponent}（GameObject={go.name}）");
+                }
+
+                scopeTarget = go.GetComponent(scopeType);
+                if (scopeTarget == null)
+                {
+                    throw new Exception($"[LRUnityLayoutPrefabGenerator] {lrComponent} 未挂载到 {go.name}，无法进行字段绑定");
                 }
             }
 
@@ -455,13 +876,32 @@ namespace LRUIPrefabGen
             {
                 if (currentTarget == null)
                 {
-                    Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] data-field=\"{field}\" 没有可绑定的脚本作用域（未指定根脚本或 data-lr-component），跳过绑定");
+                    throw new Exception(
+                        $"[LRUnityLayoutPrefabGenerator] data-field=\"{field}\" 没有可绑定的脚本作用域（未指定根脚本或 data-lr-component）");
                 }
-                else
+
+                var entry = new JObject
                 {
-                    FieldBinder.BindField(currentTarget, field, go);
-                    boundFieldCount++;
+                    ["field"] = field,
+                    ["node"] = go.name,
+                    ["path"] = GetGameObjectPath(go),
+                    ["componentType"] = currentTarget.GetType().FullName,
+                    ["componentPath"] = GetGameObjectPath(currentTarget.gameObject),
+                    ["status"] = "attempted",
+                };
+                bindingLog.Add(entry);
+                string resolvedField;
+                bool bound = FieldBinder.BindField(currentTarget, field, go, out resolvedField);
+                entry["status"] = bound ? "bound" : "failed";
+                if (!string.Equals(resolvedField, field, StringComparison.Ordinal))
+                {
+                    entry["resolvedField"] = resolvedField;
                 }
+                if (!bound)
+                {
+                    throw new Exception($"[LRUnityLayoutPrefabGenerator] 字段绑定失败: {field}（节点={go.name}）");
+                }
+                boundFieldCount++;
             }
 
             var childrenToken = node["children"] as JArray;
@@ -479,10 +919,12 @@ namespace LRUIPrefabGen
             {
                 string childName = (string)child["name"];
                 Transform childTransform = string.IsNullOrEmpty(childName) ? null : FindDescendantByName(go.transform, childName);
-                if (childTransform != null)
+                if (childTransform == null)
                 {
-                    CollectAndBindScoped(child, childTransform.gameObject, scopeTarget, ref boundFieldCount);
+                    throw new Exception(
+                        $"[LRUnityLayoutPrefabGenerator] JSON 节点 {childName} 在 {go.name} 下找不到对应的 GameObject，字段绑定中止");
                 }
+                CollectAndBindScoped(child, childTransform.gameObject, scopeTarget, ref boundFieldCount, bindingLog);
             }
         }
 
@@ -528,8 +970,7 @@ namespace LRUIPrefabGen
             GameObject prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
             if (prefabAsset == null)
             {
-                Debug.LogWarning($"[LRUnityLayoutPrefabGenerator] 无法加载 Prefab 资产用于后处理: {prefabPath}");
-                return;
+                throw new Exception($"[LRUnityLayoutPrefabGenerator] 无法加载 Prefab 资产用于后处理: {prefabPath}");
             }
 
             // Phase 2.1: 修复根节点 RectTransform（SaveAsPrefabAsset 时 Unity 会重置 Canvas 根节点的 RectTransform）
@@ -573,6 +1014,61 @@ namespace LRUIPrefabGen
         {
             string component = (string)node["component"];
             string field = (string)node["field"];
+
+            // Screen/Scene mask styles. InjectScreenNode has already added the
+            // Image by this phase, so apply sprite/type/color here. These keys
+            // are deferred by ApplyStyleOverrides until the Image exists.
+            bool isScreen = string.Equals((string)node["name"], "Screen", StringComparison.OrdinalIgnoreCase)
+                || string.Equals((string)node["name"], "Scene", StringComparison.OrdinalIgnoreCase);
+            if (isScreen)
+            {
+                Image screenImage = go.GetComponent<Image>();
+                if (screenImage == null && go.transform.root.GetComponent<Canvas>() != null)
+                {
+                    screenImage = go.AddComponent<Image>();
+                }
+                if (screenImage == null)
+                {
+                    throw new Exception(
+                        $"[LRUnityLayoutPrefabGenerator] Screen 节点 {go.name} 没有 Image，无法应用遮罩样式");
+                }
+
+                string screenSprite = (string)node["sprite"];
+                if (!string.IsNullOrEmpty(screenSprite))
+                {
+                    screenImage.sprite = LoadAsset<Sprite>(screenSprite);
+                }
+
+                string screenType = (string)node["imageType"];
+                if (!string.IsNullOrEmpty(screenType))
+                {
+                    Image.Type parsedType;
+                    if (!Enum.TryParse(screenType, true, out parsedType))
+                    {
+                        throw new Exception(
+                            $"[LRUnityLayoutPrefabGenerator] Screen 节点 {go.name} 的 imageType 非法: {screenType}");
+                    }
+                    screenImage.type = parsedType;
+                }
+
+                if (node["texture"] != null)
+                {
+                    throw new Exception(
+                        $"[LRUnityLayoutPrefabGenerator] Screen 节点 {go.name} 使用 Image，不支持 texture；请使用 data-sprite");
+                }
+
+                string colorKey = node["imageColor"] != null ? "imageColor" : "color";
+                if (node[colorKey] != null)
+                {
+                    Color? screenColor = ReadColor(node[colorKey]);
+                    if (!screenColor.HasValue)
+                    {
+                        throw new Exception(
+                            $"[LRUnityLayoutPrefabGenerator] Screen 节点 {go.name} 的 {colorKey} 必须是 4 个数值");
+                    }
+                    screenImage.color = screenColor.Value;
+                }
+            }
 
             // text.localized* 系列的 Localizer 挂载规则：
             // - 有 field 绑定：移除 Localizer（由 C# 脚本控制文本内容）
@@ -1080,11 +1576,14 @@ namespace LRUIPrefabGen
 
             GameObject windowGo = windowTransform.gameObject;
 
-            // 检查是否已经有 Image 组件
+            // 检查是否已经有可视化组件。显式 window.frame 通常由
+            // content.async-image 提供 RawImage + texture；此时不能再补一层
+            // 深色 Image，否则会把真实底框盖住。
             var existingImage = windowGo.GetComponent<Image>();
-            if (existingImage != null)
+            var existingRawImage = windowGo.GetComponent<RawImage>();
+            if (existingImage != null || existingRawImage != null)
             {
-                Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectWindowImageNode: Window 节点已有 Image 组件，跳过添加");
+                Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectWindowImageNode: Window 节点已有 Image/RawImage，跳过添加");
                 return;
             }
 
