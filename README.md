@@ -21,10 +21,9 @@ graph TD
     C --> D["阶段 6-8<br/>设计合并 + 验收用例 + 任务清单<br/>/lr-openspec-tasks"]
     D --> E["阶段 9<br/>代码实现<br/>/lr-openspec-apply"]
 
-    E --> P["阶段 9b（可选）<br/>UI Prefab 生成<br/>/lr-openspec-ui-prefab"]
-
     E --> F["阶段 10（可选）<br/>一致性检查<br/>/lr-openspec-reconcile"]
     E --> G["阶段 11a<br/>代码审查<br/>/lr-openspec-code-review"]
+    G --> P["阶段 9b（可选）<br/>UI Prefab 生成<br/>/lr-openspec-ui-prefab"]
     E --> H["阶段 11b<br/>测试验证<br/>/lr-openspec-test-validate"]
     P --> H
 
