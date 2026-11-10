@@ -174,6 +174,7 @@ Run 'openspec validate growth-fund' for details.
 
 - [ ] reconcile-report.md 的差异已处理
 - [ ] code-review-report.md 的高严重度问题已修复
+- [ ] test-validate-report.md 的 change 级结论不是 `not_passed`（`runtime_config_only` / `runtime_interaction_incomplete` 都算未完成）
 - [ ] test-validate-report.md 的人工测试清单已执行
 - [ ] rule-candidates.md 的勾选已回写到 config.yaml/schemas/
 
