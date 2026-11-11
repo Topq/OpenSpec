@@ -34,7 +34,7 @@
           "properties": {
             "type": "Filled",
             "fillMethod": "Horizontal",
-            "fillOrigin": "Left",
+            "fillOrigin": 0,
             "fillAmount": 1.0,
             "raycastTarget": false,
             "color": "#FFFFFF",

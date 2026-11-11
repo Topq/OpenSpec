@@ -1,5 +1,20 @@
 # SE UI Prefab 更新记录
 
+## 2026-11-11
+
+- 新增 `data-surface="fullscreen|modal|hud"` 页面结构契约：fullscreen 必须有真实根 Bg、禁止 Window；modal 根节点禁止 Bg、必须 Window/WindowBg；hud 无 Bg/Window。TSX 校验器和 Layout JSON 校验器同步检查。
+- Bg/WindowBg 必须显式 `data-texture`/`data-sprite`；禁止用装饰框 `jh_frame_08` 作为背景/窗框。全屏背景/弹窗窗框必须有参考证据。
+- `reference-notes.md` 新增 Surface 证据（Bg/WindowBg 组件、贴图、type/color/size）和参考截图要求。
+- 步骤 7 新增试点门禁：先做 1 个代表面板并截图与参考同场景对比，通过后才批量生成。
+- `validate_unity_layout.py` 目录模式改为逐 TSX 文件分组，按根类 + 嵌套 `data-lr-component` 自动筛选 C#，不再跨面板合并字段；输出缺 data-surface 的警告。
+- `LRUnityLayoutPrefabGenerator.GenerateFromLayout` 入口自动 `ComponentRecipeLoader.ClearCache()`，改配方 JSON 后不再需要手动清缓存。
+- 保存后核验 `VerifySerializedBinding` 增加 `IsInstanceOfType` 类型断言（数组按元素类型），类型错绑会把 `verificationStatus` 置为 `failed`。
+- 新增 `LRRecipeSmokeTest.cs`：遍历全部配方，在临时 GameObject 上 Apply 一次，提前发现属性/类型/后处理错误；菜单 `Tools/LR/Recipe Smoke Test`，MCP 可调 `Run(outputJsonPath)`。
+- 修复 `control.input` 背景：项目不存在 `input_bg.png`，改用 `bg2x2.png` + 半透明色；smoke test 现为 23/23 通过。
+- 同步修正配方：`content.async-icon` 改 Image/m_Image；`control.progress.fillOrigin` 改为 int；`control.toggle` 改用公开属性 `isOn`/`interactable`。
+- SKILL 版本更新到 v2.6。
+
+
 ## 2026-11-08
 
 - 生成器新增资源自动修复：原路径不存在时按文件名在 `Assets/` 下查找唯一同名资源；多个候选按目录相近度、`AtlasResources` 优先、路径长度排序，仍并列则失败并列出候选。修复记录写入 `generation-report.json.autoFixes`。

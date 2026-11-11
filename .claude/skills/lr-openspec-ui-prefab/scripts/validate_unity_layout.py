@@ -283,7 +283,106 @@ def rect_contains(parent: tuple[float, float, float, float], child: tuple[float,
     return px0 <= cx0 and py0 <= cy0 <= cy1 <= py1 and cx1 <= px1
 
 
-def validate_file(tsx_path: Path, catalog: set[str], errors: list[str], scopes: list[Scope]) -> None:
+PAGE_ROOT_COMPONENTS = {"surface.panel", "surface.modal"}
+SURFACE_VALUES = ("fullscreen", "modal", "hud")
+BG_TEXTURE_DENYLIST = ("jh_frame_08",)
+
+
+def _children_by_name(node: TSXNode) -> dict[str, TSXNode]:
+    result: dict[str, TSXNode] = {}
+    for child in node.children:
+        name = child.attr("data-name")
+        if name and name not in result:
+            result[name] = child
+    return result
+
+
+def _check_bg_resource(node: TSXNode, label: str, tsx_path: Path, errors: list[str]) -> None:
+    texture = node.attr("data-texture")
+    sprite = node.attr("data-sprite")
+    if not texture and not sprite:
+        errors.append(
+            f"{tsx_path}:{node.line}:{node.column} {label} 必须显式写 data-texture 或 data-sprite，"
+            f"不能依赖 content.async-image/content.icon 的默认占位图"
+        )
+        return
+    for path in (texture, sprite):
+        if path and any(token in path for token in BG_TEXTURE_DENYLIST):
+            errors.append(
+                f"{tsx_path}:{node.line}:{node.column} {label} 使用了装饰框 {path}，"
+                f"不能作为背景/窗框；请改用真实背景或标准窗框贴图"
+            )
+
+
+def _check_surface_contract(
+    root_component: TSXNode | None,
+    tsx_path: Path,
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    """Enforce the page-type -> node-structure contract."""
+    if root_component is None or root_component.attr("data-component") not in PAGE_ROOT_COMPONENTS:
+        return
+    children = _children_by_name(root_component)
+    surface = root_component.attr("data-surface")
+    if surface is None:
+        surface = "modal" if "Window" in children else ("fullscreen" if "Bg" in children else "hud")
+        warnings.append(
+            f"{tsx_path}: 根节点缺少 data-surface，按结构推断为 {surface}；请在根节点显式声明"
+        )
+    elif surface not in SURFACE_VALUES:
+        errors.append(f"{tsx_path}: 根节点 data-surface={surface} 非法，允许 {SURFACE_VALUES}")
+        return
+
+    bg = children.get("Bg")
+    window = children.get("Window")
+
+    if surface == "modal":
+        if bg is not None:
+            errors.append(
+                f"{tsx_path}:{bg.line}:{bg.column} modal 根节点禁止整屏 Bg；"
+                f"背景由自动 Screen 提供，窗框放在 Window/WindowBg 下"
+            )
+        if window is None:
+            errors.append(f"{tsx_path}: modal 缺少 Window 节点")
+            return
+        window_children = _children_by_name(window)
+        window_bg = window_children.get("WindowBg") or window_children.get("Bg")
+        if window_bg is None:
+            errors.append(
+                f"{tsx_path}:{window.line}:{window.column} modal 的 Window 下缺少 WindowBg/Bg 窗框节点"
+            )
+        else:
+            _check_bg_resource(window_bg, "WindowBg", tsx_path, errors)
+        return
+
+    if surface == "fullscreen":
+        if bg is None:
+            errors.append(f"{tsx_path}: fullscreen 根节点缺少 Bg 全屏背景")
+        else:
+            _check_bg_resource(bg, "Bg", tsx_path, errors)
+        if window is not None:
+            errors.append(
+                f"{tsx_path}:{window.line}:{window.column} fullscreen 根节点不应有 Window；"
+                "弹窗请声明 data-surface=modal"
+            )
+        return
+
+    if bg is not None:
+        errors.append(f"{tsx_path}:{bg.line}:{bg.column} hud 根节点不应有 Bg")
+    if window is not None:
+        errors.append(f"{tsx_path}:{window.line}:{window.column} hud 根节点不应有 Window")
+
+
+def validate_file(
+    tsx_path: Path,
+    catalog: set[str],
+    errors: list[str],
+    scopes: list[Scope],
+    warnings: list[str] | None = None,
+) -> None:
+    if warnings is None:
+        warnings = []
     try:
         root = parse_tsx(tsx_path)
     except TSXParseError as exc:
@@ -640,6 +739,8 @@ def validate_file(tsx_path: Path, catalog: set[str], errors: list[str], scopes: 
             except TSXParseError:
                 pass  # already reported above
 
+    _check_surface_contract(root_component, tsx_path, errors, warnings)
+
 
 def _format_hits(hits: list[tuple[str, str]]) -> str:
     return ", ".join(f"{raw} @ {loc}" for raw, loc in hits)
@@ -957,6 +1058,31 @@ def check_field_completeness(scopes: list[Scope], csharp_files: list[Path], erro
     return total_hits
 
 
+def _required_classes(tsx_path: Path) -> tuple[str | None, set[str]]:
+    """Root data-name + every data-lr-component class used by this TSX."""
+    try:
+        root = parse_tsx(tsx_path)
+    except TSXParseError:
+        return None, set()
+    root_component = next((child for child in root.children if child.is_layout_relevant()), None)
+    if root_component is None:
+        return None, set()
+    classes: set[str] = set()
+    root_name = root_component.attr("data-name")
+    if root_name:
+        classes.add(root_name)
+
+    def walk(node: TSXNode) -> None:
+        lr_component = node.attr("data-lr-component")
+        if lr_component:
+            classes.add(lr_component.rsplit(".", 1)[-1])
+        for child in node.children:
+            walk(child)
+
+    walk(root_component)
+    return root_name, classes
+
+
 def find_tsx_files(target: Path) -> list[Path]:
     if target.is_file():
         return [target] if target.suffix.lower() == ".tsx" else []
@@ -998,16 +1124,40 @@ def main() -> int:
         return 1
 
     errors: list[str] = []
-    scopes: list[Scope] = []
-    for tsx_file in tsx_files:
-        validate_file(tsx_file, catalog, errors, scopes)
-
+    warnings: list[str] = []
     runtime_checks: list[str] = []
-    try:
-        total_hits = check_field_completeness(scopes, [p.resolve() for p in args.csharp], errors, runtime_checks)
-    except ValueError as exc:
-        errors.append(str(exc))
-        total_hits = 0
+    csharp_files = [p.resolve() for p in args.csharp]
+    csharp_by_class: dict[str, Path] = {}
+    for csharp_path in csharp_files:
+        class_name = extract_class_name(csharp_path)
+        if class_name:
+            csharp_by_class[class_name] = csharp_path
+
+    total_hits = 0
+    for tsx_file in tsx_files:
+        # Each TSX is its own root scope. Field completeness is checked only
+        # against the C# classes that this TSX actually uses (root data-name +
+        # nested data-lr-component), so validating a directory no longer
+        # merges sibling panels and reports cross-panel duplicate fields.
+        file_scopes: list[Scope] = []
+        validate_file(tsx_file, catalog, errors, file_scopes, warnings)
+        if not csharp_files:
+            continue
+        _, required_classes = _required_classes(tsx_file)
+        selected = [csharp_by_class[name] for name in required_classes if name in csharp_by_class]
+        if not selected:
+            warnings.append(
+                f"{tsx_file}: 未找到与 {sorted(required_classes)} 匹配的 C# 脚本，跳过字段完整性检查"
+            )
+            continue
+        try:
+            total_hits += check_field_completeness(file_scopes, selected, errors, runtime_checks)
+        except ValueError as exc:
+            errors.append(str(exc))
+
+    if warnings:
+        for warning in warnings:
+            print(f"警告: {warning}", file=sys.stderr)
 
     if errors:
         print(f"校验失败，共 {len(errors)} 项:", file=sys.stderr)

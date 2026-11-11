@@ -31,6 +31,7 @@
 | `data-component` | 语义组件 ID，取值见 unity-ui-components.md 白名单 | `data-component="control.button"` |
 | `data-field` | 绑定到 C# 脚本的 `[SerializeField]` 字段名；只在该节点需要被代码访问时写 | `data-field="m_BuyButton"` |
 | `data-prefab-child-path` | 引用父级框架组件 Prefab 内部的已有子节点路径，不新建节点，见下方"预制件内部引用"一节 | `data-prefab-child-path="Viewport/Content"` |
+| `data-surface` | **仅页面根节点**声明页面类型：`fullscreen` / `modal` / `hud`；决定允许的节点结构，见下方"页面类型与结构" | `data-surface="modal"` |
 
 ### 布局属性（RectTransform 的精确映射，不允许省略 `data-pos`/`data-size`）
 
@@ -53,6 +54,23 @@
 | 居中固定 | `(0.5, 0.5, 0.5, 0.5)` | `(0.5, 0.5)` |
 | 横向拉伸铺满 | `data-anchor-min="(0, y)"` + `data-anchor-max="(1, y)"` | 按需 |
 | 全部拉伸铺满 | `data-anchor-min="(0, 0)"` + `data-anchor-max="(1, 1)"` | 按需 |
+
+### 页面类型与结构（`data-surface`，仅页面根节点）
+
+页面根节点必须显式声明 `data-surface`，生成器/校验器按类型检查结构：
+
+| `data-surface` | 根 `Bg` | `Window` / `WindowBg` | 标题 | 说明 |
+|---|---|---|---|---|
+| `fullscreen` | **必须有**，且显式 `data-texture`/`data-sprite` 真实全屏背景 | 禁止 | `data-lr-style="title"` | 主界面、结算页、全屏活动页 |
+| `modal` | **禁止**（整屏背景由生成器自动注入的 `Screen` 遮罩提供） | 必须有 `Window`；`Window` 下必须有 `WindowBg`（或 `Bg`），并显式窗框贴图 | `data-role="modal.header"` + 适合浅色框的深色 | 弹窗、确认框、详情面板 |
+| `hud` | 禁止 | 禁止 | 按 HUD 设计 | 战斗内 HUD、覆盖层 |
+
+**背景/窗框资源规则**：
+
+- `Bg` / `WindowBg` 不允许省略 `data-texture`/`data-sprite`；不能依赖 `content.async-image`/`content.icon` 的默认占位图。
+- 禁止用 `Assets/UI/AtlasResources/CommonPanel/jh_frame_08.png` 作为 `Bg`/`WindowBg`：它是装饰框，不是背景/窗框。
+- 全屏背景优先 `content.async-image` + 真实全屏纹理；弹窗窗框优先现网标准框（大框 `ty_tk_frame_04`、小框 `ty_tk_frame_06`），也允许显式 9-slice 面板（如 `general_panel_bg`）。
+- 参考 Prefab 的 `TopBg`/装饰条不是窗框；只有覆盖整个窗口的节点才能作为 `WindowBg` 依据。
 
 ### 文本属性（`data-component="text.localized"` 专用）
 
@@ -104,6 +122,7 @@
 - `data-color` 优先作为文本颜色；节点没有 TMP 但有 Image/RawImage 时按图片颜色处理；`data-name="Screen"` 的遮罩节点由生成器注入的 Screen Image 消费。按钮同时有文本和图片时，`data-color` 是文本颜色，图片颜色请用 `data-image-color`。
 - 每个覆盖必须有可消费的目标；没有目标时校验器报错，生成器也拒绝生成，不会静默忽略。
 - 全屏遮罩/背景节点用 `data-overlay="true"` 标记，校验器会豁免它与兄弟节点的重叠检查（它不是普通兄弟内容）。
+- `Bg`/`WindowBg` 必须显式资源；校验器会对缺资源或使用 `jh_frame_08` 的节点报错。
 - 常用样式优先沉淀为 `data-lr-style` 命名变体；具体覆盖必须能在 `reference-notes.md` 解释“为什么不用命名样式”。
 
 示例：
@@ -192,13 +211,14 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/build_ui_style_profile.py \
 ```tsx
 <div data-component="text.localized" data-name="TxtTitle" data-role="modal.header" />
 <button data-component="control.button" data-name="BtnConfirm" data-role="button.primary" />
-<div data-component="content.async-image" data-name="Bg" data-role="window.frame" />
+<div data-component="content.async-image" data-name="WindowBg" data-role="window.frame" data-texture="Assets/UI/Texture/decorativeextra/ty_tk_frame_04.png" />
 <div data-component="surface.page" data-name="Screen" data-role="screen" />
 ```
 
 规则：
 
 - 角色只能是上表白名单；`button.*` 必须用于 `control.button`，文本角色必须有 TMP 目标，`window.frame` 必须有 RawImage 目标，`screen` 必须名为 `Screen`/`Scene`。
+- `window.frame` 只能用于覆盖整个 `Window` 的节点；`TopBg`/标题装饰条/局部 RawImage 不是窗框。`Bg`/`WindowBg` 仍必须显式写 `data-texture`/`data-sprite`。
 - profile 只提供视觉属性；`data-pos`/`data-size`/`data-anchors`/`data-pivot` 永远以 TSX 为准。
 - TSX 显式 `data-*` 覆盖优先于 profile；profile 缺少角色时转换器给警告并保留配方/显式样式。
 - `tsx_to_json.py --profile ...` 会写 `_styleSources`，标明每个样式键来自 `tsx` 还是 `profile:<role>`。

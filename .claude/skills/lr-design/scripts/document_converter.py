@@ -139,6 +139,8 @@ class DocumentConverter:
 
         elif block_type == "image":
             self._convert_image(block, lines, image_dir)
+        elif block_type == "board":
+            self._convert_board(block, lines, image_dir)
 
         elif block_type == "sheet":
             self._convert_sheet(block, lines)
@@ -268,6 +270,25 @@ class DocumentConverter:
                 lines.append(f"![图片](images/{file_token}.png)")
         else:
             lines.append(f"![图片](images/{file_token}.png)")
+
+        lines.append("")
+
+    def _convert_board(self, block: Dict, lines: List[str], image_dir: Optional[Path]):
+        """转换画板（block_type=43）：仅在成功下载缩略图时输出图片链接。"""
+        board = block.get("board", {})
+        board_token = board.get("token", "")
+        local_path = self.image_mapping.get(board_token)
+        if not local_path:
+            return
+
+        if image_dir:
+            try:
+                rel_path = Path(local_path).relative_to(image_dir.parent)
+                lines.append(f"![画板]({rel_path.as_posix()})")
+            except ValueError:
+                lines.append(f"![画板](images/{Path(local_path).name})")
+        else:
+            lines.append(f"![画板](images/{Path(local_path).name})")
 
         lines.append("")
 

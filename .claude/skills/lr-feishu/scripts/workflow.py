@@ -86,6 +86,18 @@ def download(url: str, out_dir: Path) -> tuple[str, str]:
         mapping = api.download_images(image_tokens, images_dir)
         converter.image_mapping = {token: str(path) for token, path in mapping.items()}
 
+    board_tokens = [
+        block["board"]["token"]
+        for block in blocks
+        if block.get("block_type") == 43 and block.get("board", {}).get("token")
+    ]
+    if board_tokens:
+        print(f"下载画板: {len(board_tokens)} 张")
+        board_mapping = api.download_boards(board_tokens, images_dir)
+        converter.image_mapping.update(
+            {token: str(path) for token, path in board_mapping.items()}
+        )
+
     sheet_tokens = [
         block["sheet"]["token"]
         for block in blocks

@@ -23,7 +23,7 @@
 | `list.single-scroll` | 单项复用滚动列表（推荐，性能优化） | 见下方详细配置 |
 | `list.scroll` | 常规滚动列表（仅在不需要复用时使用） | `ScrollRect`、`Viewport/Content`、裁剪组件 |
 | `content.async-image` | 异步加载大图（背景图、立绘等大尺寸图片） | `RawImage` 与 `LR.AsyncTexture`，见下方详细配置 |
-| `content.async-icon` | 异步加载图标（非道具类图标，如头像、功能图标等） | `RawImage` 与 `LR.AsyncIcon` |
+| `content.async-icon` | 异步加载图标（非道具类图标，如头像、功能图标等） | `Image` 与 `LR.AsyncIcon`（`m_Image` 绑定 `Image`） |
 | `content.divider` | 分割线（水平/垂直装饰线） | `UnityEngine.UI.Image`，默认 `ty_line_fgx02.png`，`raycastTarget=false` |
 | `content.icon` | UI 状态标识和静态图标（锁定徽章、已领取遮罩、功能入口等），图片在设计期确定 | `UnityEngine.UI.Image`，默认图集贴图，`raycastTarget=false` |
 | `content.item-icon-root` | 运行时 `ItemIconBase.Allocate()` 的挂载点，**专门用于道具展示**（装备、材料、货币等游戏道具） | 空 `GameObject`，只有 `RectTransform`，不挂载任何 UI 组件；字段类型必须是 `Transform` |
@@ -245,13 +245,13 @@ raycastTarget: false  # 不响应点击（纯展示图片）
 ```
 AsyncIcon (GameObject)
 ├── RectTransform
-├── RawImage 组件
+├── Image 组件
 └── LR.AsyncIcon 组件
 ```
 
 **用途**：
 - **用于异步加载非道具类图标**：玩家头像、公会徽章、功能图标等
-- 使用 `RawImage` 和 `AsyncIcon` 实现异步加载
+- 使用 `Image` 和 `AsyncIcon` 实现异步加载；SE 的 `LR.AsyncIcon` 序列化字段是 `m_Image`（指向同节点的 `Image`），不是 `m_RawImage`
 - 区别于 `content.item-icon-root`（道具专用，动态实例化完整组件）
 
 **默认样式**：
@@ -294,7 +294,7 @@ sprite: null  # 留空，由美术后续替换或从原型指定
 
 **对比其他图标类型**：
 - `content.icon`：静态 `Image`，设计期确定，字段类型 `Image` 或 `GameObject`
-- `content.async-icon`：异步 `RawImage`，运行时加载，字段类型 `RawImage` 或 `GameObject`
+- `content.async-icon`：异步 `Image`，运行时加载，字段类型 `LR.AsyncIcon`、`Image` 或 `GameObject`
 - `content.item-icon-root`：动态容器，运行时实例化完整组件，字段类型 `Transform`
 
 

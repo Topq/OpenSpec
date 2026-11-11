@@ -48,9 +48,9 @@
     }
   ],
   "defaultValues": {
-    "m_IsOn": false,
+    "isOn": false,
     "toggleTransition": "Fade",
-    "m_Interactable": true
+    "interactable": true
   },
   "notes": [
     "项目使用了扩展的 Toggle（增加了 m_ActiveContentRoot/m_UnActiveContentRoot 字段），不是 Unity 原生 Toggle。",

@@ -696,6 +696,9 @@ namespace LRUIPrefabGen
                     case "async-texture":
                         PostProcessAsyncTexture(go);
                         break;
+                    case "async-icon":
+                        PostProcessAsyncIcon(go);
+                        break;
                     case "single-scroll-view":
                         PostProcessSingleScrollView(go, node);
                         break;
@@ -972,44 +975,55 @@ namespace LRUIPrefabGen
         /// </summary>
         static void PostProcessAsyncTexture(GameObject go)
         {
-            // content.async-image uses LR.AsyncTexture; content.async-icon uses
-            // LR.AsyncIcon. Both expose the same m_RawImage binding field.
-            Component asyncTexture = null;
             Type asyncTextureType = FindType("LR.AsyncTexture");
-            if (asyncTextureType != null)
-            {
-                asyncTexture = go.GetComponent(asyncTextureType);
-            }
-            if (asyncTexture == null)
-            {
-                Type asyncIconType = FindType("LR.AsyncIcon");
-                if (asyncIconType != null)
-                {
-                    asyncTexture = go.GetComponent(asyncIconType);
-                }
-            }
+            var asyncTexture = asyncTextureType != null ? go.GetComponent(asyncTextureType) : null;
             var rawImage = go.GetComponent<RawImage>();
 
             if (asyncTexture == null || rawImage == null)
             {
                 throw new Exception(
-                    $"[ComponentRecipes] PostProcessAsyncTexture 失败：GameObject {go.name} 缺少 AsyncTexture/AsyncIcon 或 RawImage 组件");
+                    $"[ComponentRecipes] PostProcessAsyncTexture 失败：GameObject {go.name} 缺少 AsyncTexture 或 RawImage 组件");
             }
 
             // 使用 SerializedObject 绑定 m_RawImage 字段
             var serializedObject = new SerializedObject(asyncTexture);
             serializedObject.Update();
             var rawImageProp = serializedObject.FindProperty("m_RawImage");
-            if (rawImageProp != null)
-            {
-                rawImageProp.objectReferenceValue = rawImage;
-                serializedObject.ApplyModifiedProperties();
-            }
-            else
+            if (rawImageProp == null)
             {
                 throw new Exception(
-                    $"[ComponentRecipes] PostProcessAsyncTexture: AsyncTexture/AsyncIcon 上未找到 m_RawImage 字段（GameObject={go.name}）");
+                    $"[ComponentRecipes] PostProcessAsyncTexture: AsyncTexture 上未找到 m_RawImage 字段（GameObject={go.name}）");
             }
+            rawImageProp.objectReferenceValue = rawImage;
+            serializedObject.ApplyModifiedProperties();
+        }
+
+        /// <summary>
+        /// AsyncIcon 组件的后处理钩子：绑定 m_Image 到同节点的 Image 组件
+        /// </summary>
+        static void PostProcessAsyncIcon(GameObject go)
+        {
+            Type asyncIconType = FindType("LR.AsyncIcon");
+            var asyncIcon = asyncIconType != null ? go.GetComponent(asyncIconType) : null;
+            var image = go.GetComponent<Image>();
+
+            if (asyncIcon == null || image == null)
+            {
+                throw new Exception(
+                    $"[ComponentRecipes] PostProcessAsyncIcon 失败：GameObject {go.name} 缺少 AsyncIcon 或 Image 组件");
+            }
+
+            // 使用 SerializedObject 绑定 m_Image 字段
+            var serializedObject = new SerializedObject(asyncIcon);
+            serializedObject.Update();
+            var imageProp = serializedObject.FindProperty("m_Image");
+            if (imageProp == null)
+            {
+                throw new Exception(
+                    $"[ComponentRecipes] PostProcessAsyncIcon: AsyncIcon 上未找到 m_Image 字段（GameObject={go.name}）");
+            }
+            imageProp.objectReferenceValue = image;
+            serializedObject.ApplyModifiedProperties();
         }
 
         /// <summary>
@@ -1106,11 +1120,16 @@ namespace LRUIPrefabGen
             // 1. 添加背景 Image
             var image = go.AddComponent<Image>();
             image.raycastTarget = true;
-            var bgSprite = LoadAsset<Sprite>("Assets/UI/AtlasResources/CommonUI/input_bg.png");
+            // CommonInputFieldPanel uses a translucent plain background (no
+            // dedicated input_bg sprite exists in this project). Use the
+            // generic 2x2 white sprite so the Image still has a valid asset.
+            var bgSprite = AssetDatabase.LoadAssetAtPath<Sprite>(
+                "Assets/UI/AtlasResources/CommonUI/bg2x2.png");
             if (bgSprite != null)
             {
                 image.sprite = bgSprite;
             }
+            image.color = new Color(1f, 1f, 1f, 0.15f);
 
             // 2. 添加 TMP_InputField
             var inputField = go.AddComponent<TMP_InputField>();

@@ -40,6 +40,7 @@ STRING_ATTRS = {
     "data-name": "name",
     "data-component": "component",
     "data-lr-component": "lrComponent",
+    "data-surface": "surface",
     "data-prefab-child-path": "prefabChildPath",
     "data-prefab-asset-path": "prefabAssetPath",
     "data-field": "field",

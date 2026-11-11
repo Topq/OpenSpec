@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageChops
     _PIL_AVAILABLE = True
 except ImportError:
     _PIL_AVAILABLE = False
@@ -200,8 +200,52 @@ class FeishuAPI:
 
         return downloaded
 
-    def _save_image(self, content: bytes, ext: str, output_dir: Path, file_token: str) -> Path:
-        """保存图片；PNG/WEBP 统一转 JPG 并限制最大边长，GIF 保留动画原样保存"""
+    def download_boards(self, board_tokens: List[str], output_dir: Path) -> Dict[str, Path]:
+        """下载文档内的画板（block_type=43）缩略图。
+
+        需要应用权限 board:whiteboard:node:read；缺权限时打印提示并跳过。
+        返回: {board_token: local_path}
+        """
+        self._ensure_token()
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        downloaded = {}
+        denied = False
+
+        for board_token in board_tokens:
+            url = f"{self.base_url}/open-apis/board/v1/whiteboards/{board_token}/download_as_image"
+            try:
+                response = requests.get(url, headers=headers, timeout=60)
+                content_type = response.headers.get("Content-Type", "")
+                if response.status_code != 200 or "application/json" in content_type:
+                    if not denied:
+                        try:
+                            detail = response.json()
+                        except Exception:
+                            detail = response.text[:200]
+                        print(f"画板下载失败 {board_token}: HTTP {response.status_code} {detail}")
+                        if "99991672" in str(detail):
+                            print("  → 缺少应用权限 board:whiteboard:node:read，开通后重试即可")
+                            denied = True
+                    continue
+
+                if "image/svg" in content_type:
+                    ext = ".svg"
+                else:
+                    ext = self._guess_image_ext(response.content) or ".png"
+                downloaded[board_token] = self._save_image(response.content, ext, output_dir, board_token, trim=True)
+            except Exception as e:
+                print(f"画板下载失败 {board_token}: {e}")
+
+        return downloaded
+
+    def _save_image(self, content: bytes, ext: str, output_dir: Path, file_token: str,
+                    trim: bool = False) -> Path:
+        """保存图片；PNG/WEBP 统一转 JPG 并限制最大边长，GIF 保留动画原样保存。
+
+        trim=True 时裁掉四周纯白留白（画板导出会带大片空白画布）。
+        """
         if not _PIL_AVAILABLE or ext == '.gif':
             local_path = output_dir / f"{file_token}{ext}"
             local_path.write_bytes(content)
@@ -216,6 +260,19 @@ class FeishuAPI:
                 img = background
             else:
                 img = img.convert("RGB")
+
+            if trim:
+                background = Image.new("RGB", img.size, (255, 255, 255))
+                bbox = ImageChops.difference(img, background).getbbox()
+                if bbox:
+                    pad = 8
+                    left, upper, right, lower = bbox
+                    img = img.crop((
+                        max(0, left - pad),
+                        max(0, upper - pad),
+                        min(img.width, right + pad),
+                        min(img.height, lower + pad),
+                    ))
 
             if max(img.size) > IMAGE_MAX_DIMENSION:
                 img.thumbnail((IMAGE_MAX_DIMENSION, IMAGE_MAX_DIMENSION), Image.LANCZOS)

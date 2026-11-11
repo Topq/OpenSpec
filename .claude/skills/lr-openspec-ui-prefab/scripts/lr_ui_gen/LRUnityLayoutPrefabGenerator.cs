@@ -49,6 +49,10 @@ namespace LRUIPrefabGen
         /// </summary>
         public static string GenerateFromLayout(string jsonPath, string prefabPath, string rootScriptTypeName)
         {
+            // Recipes are JSON files on disk. Unity does not recompile when only
+            // a recipe JSON changes, so a stale process-wide cache from a prior
+            // generation would silently keep the old component defaults.
+            ComponentRecipeLoader.ClearCache();
             LRAutoFixLog.Clear();
             var report = new JObject
             {
@@ -136,9 +140,11 @@ namespace LRUIPrefabGen
             // surface.panel 根节点（独立弹窗/全屏面板，有 Canvas）：自动创建 Screen/PowerSaveMode 节点
             if (rootComponentId == "surface.panel")
             {
-                InjectScreenNode(rootGo);
+                // 2026-11-11：按需求暂时关闭自动注入。
+                // Screen / Window 底框改由 TSX 显式声明，生成器不再替设计做决定。
+                // InjectScreenNode(rootGo);
                 InjectPowerSaveModeNode(rootGo);
-                InjectWindowImageNode(rootGo);
+                // InjectWindowImageNode(rootGo);
             }
 
             string fullPrefabPath = prefabPath.EndsWith(".prefab") ? prefabPath : prefabPath + ".prefab";
@@ -476,6 +482,34 @@ namespace LRUIPrefabGen
                 {
                     error = $"[核验] {componentType}.{field} 保存后引用为空（节点={expectedPath}）";
                     return false;
+                }
+
+                // Non-null is not enough: the saved reference must be assignable
+                // to the declared [SerializeField] type. Array element bindings
+                // (m_X[0]) are checked against the element type.
+                string fieldName = field;
+                int bracket = fieldName.IndexOf('[');
+                if (bracket >= 0)
+                {
+                    fieldName = fieldName.Substring(0, bracket);
+                }
+                var fieldInfo = owner.GetType().GetField(
+                    fieldName,
+                    System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.NonPublic);
+                if (fieldInfo != null)
+                {
+                    Type expectedType = fieldInfo.FieldType;
+                    if (expectedType.IsArray)
+                    {
+                        expectedType = expectedType.GetElementType();
+                    }
+                    if (expectedType != null && !expectedType.IsInstanceOfType(value))
+                    {
+                        error = $"[核验] {componentType}.{field} 类型不匹配：期望 {expectedType.FullName}，实际 {value.GetType().FullName}（节点={expectedPath}）";
+                        return false;
+                    }
                 }
 
                 GameObject referenceGo = value as GameObject;
@@ -1551,11 +1585,13 @@ namespace LRUIPrefabGen
             }
 
             // 添加 PowerSaveMode
-            Type powerSaveType = FindType("PowerSaveMode");
-            if (powerSaveType != null)
-            {
-                pmGo.AddComponent(powerSaveType);
-            }
+            // 2026-11-11：按需求暂时不再自动挂 PowerSaveMode，只保留 LR.SwitchMainCamera；
+            // 需要时由 Prefab/人工补挂。
+            // Type powerSaveType = FindType("PowerSaveMode");
+            // if (powerSaveType != null)
+            // {
+            //     pmGo.AddComponent(powerSaveType);
+            // }
 
             Debug.Log($"[LRUnityLayoutPrefabGenerator] InjectPowerSaveModeNode: {rootGo.name} → PowerSaveMode 节点已注入");
         }

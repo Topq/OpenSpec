@@ -28,6 +28,83 @@ STYLE_KEYS = {
 }
 
 
+PAGE_ROOT_COMPONENTS = {"surface.panel", "surface.modal"}
+SURFACE_VALUES = {"fullscreen", "modal", "hud"}
+BG_TEXTURE_DENYLIST = ("jh_frame_08",)
+
+
+def _children_by_name(node: dict) -> dict[str, dict]:
+    result: dict[str, dict] = {}
+    children = node.get("children", [])
+    if not isinstance(children, list):
+        return result
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        name = child.get("name")
+        if isinstance(name, str) and name and name not in result:
+            result[name] = child
+    return result
+
+
+def _check_bg_resource(node: dict, label: str, path: str, errors: list[str]) -> None:
+    texture = node.get("texture")
+    sprite = node.get("sprite")
+    if not texture and not sprite:
+        errors.append(
+            f"{path}: {label} 必须显式写 texture 或 sprite，不能依赖配方默认占位图"
+        )
+        return
+    for value in (texture, sprite):
+        if isinstance(value, str) and any(token in value for token in BG_TEXTURE_DENYLIST):
+            errors.append(
+                f"{path}: {label} 使用了装饰框 {value}，不能作为背景/窗框"
+            )
+
+
+def _check_surface_contract(data: dict, errors: list[str]) -> None:
+    if not isinstance(data, dict) or data.get("component") not in PAGE_ROOT_COMPONENTS:
+        return
+    children = _children_by_name(data)
+    surface = data.get("surface")
+    if surface is None:
+        surface = "modal" if "Window" in children else ("fullscreen" if "Bg" in children else "hud")
+    elif surface not in SURFACE_VALUES:
+        errors.append(f"root: surface={surface!r} 非法，允许 {sorted(SURFACE_VALUES)}")
+        return
+
+    bg = children.get("Bg")
+    window = children.get("Window")
+
+    if surface == "modal":
+        if bg is not None:
+            errors.append("root: modal 根节点禁止整屏 Bg；背景由自动 Screen 提供，窗框放在 Window 下")
+        if window is None:
+            errors.append("root: modal 缺少 Window 节点")
+            return
+        window_children = _children_by_name(window)
+        window_bg = window_children.get("WindowBg") or window_children.get("Bg")
+        if window_bg is None:
+            errors.append("root/Window: modal 的 Window 下缺少 WindowBg/Bg 窗框节点")
+        else:
+            _check_bg_resource(window_bg, "WindowBg", "root/Window/WindowBg", errors)
+        return
+
+    if surface == "fullscreen":
+        if bg is None:
+            errors.append("root: fullscreen 根节点缺少 Bg 全屏背景")
+        else:
+            _check_bg_resource(bg, "Bg", "root/Bg", errors)
+        if window is not None:
+            errors.append("root: fullscreen 根节点不应有 Window")
+        return
+
+    if bg is not None:
+        errors.append("root: hud 根节点不应有 Bg")
+    if window is not None:
+        errors.append("root: hud 根节点不应有 Window")
+
+
 def validate_layout_json(json_path: Path, project_root: Path | None = None) -> tuple[bool, list[str]]:
     errors: list[str] = []
     try:
@@ -77,7 +154,7 @@ def validate_layout_json(json_path: Path, project_root: Path | None = None) -> t
                 errors.append(f"{path}: {key} 必须是 {lengths} 长度之一的有限数值数组")
         for key in ("field", "lrComponent", "text", "textStyle", "textAlign", "verticalAlign",
                     "layoutGroup", "layoutChildAlignment", "font", "fontMaterial", "sprite",
-                    "imageType", "texture", "role", "tag"):
+                    "imageType", "texture", "role", "tag", "surface"):
             if key in node and not isinstance(node[key], str):
                 errors.append(f"{path}: {key} 必须是字符串")
         for key, allowed in ENUM_VALUES.items():
@@ -146,6 +223,7 @@ def validate_layout_json(json_path: Path, project_root: Path | None = None) -> t
             check_node(child, f"{path}/children[{index}]", child_scope)
 
     check_node(data, "root", scopes[0], is_root=True)
+    _check_surface_contract(data, errors)
     for scope in scopes:
         for name, fields in scope.items():
             indexed = [field for field in fields if "[" in field]

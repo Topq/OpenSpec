@@ -122,6 +122,8 @@ MixGrowthFundPage.cs (BaseActivityPage):
 3. **写结论**：`changes/<id>/demo/unity/reference-notes.md` 至少包含：
    - 候选路径、选中项、选择理由；
    - 结构结论：骨架、命名、组件组合、模板位置；
+   - **Surface 证据（必填）**：每个参考的 `Bg`/`WindowBg` 节点、组件类型（Image/RawImage/AsyncTexture）、贴图路径、Image type/color/size；数据直接取自 `references.json`。没有同功能参考时明确写"未做实时参考"；
+   - **参考截图**：至少一张参考 Prefab 自身截图（或说明无法截图的理由）；截图是判断浅色框/深色框、文字颜色的硬证据，不能只看结构；
    - 样式映射：角色 → `data-lr-style` 或具体覆盖值；
    - 每个具体覆盖的理由；
    - 未决/冲突/低置信度项。
@@ -156,6 +158,7 @@ MixGrowthFundPage.cs (BaseActivityPage):
    - `divider`（分割线）
    - `screen`（遮罩）
 5. 在步骤 3 中按角色套用：结构/命名以参考 Prefab 为准；同功能参考与模块档案冲突时，**同功能参考优先**；仍无法解释的差异写进 `reference-notes.md`。
+   - `window.frame` 只取覆盖整个窗口的节点；`TopBg`/标题装饰条/局部 RawImage 不是窗框。没有可靠值时不要套 role，按参考证据显式写窗框贴图。
 
 风格档案是参考，不是硬约束；某个角色的高频值不一定适合当前面板，最终以已验收原型 + 同功能参考为准。
 
@@ -164,6 +167,14 @@ MixGrowthFundPage.cs (BaseActivityPage):
 **只为继承 Page 基类的脚本生成 TSX 文件**。产出位置：`changes/<id>/demo/unity/<PageClassName>.tsx`（如 `MixGrowthFundPage.tsx`）。
 
 **MonoBehaviour 组件（如 Cell/Row）不生成独立 TSX**，而是在 Page 的 TSX 内部直接定义其层级结构（作为模板节点，运行时通过 `Instantiate` 复用）。
+
+**先声明页面类型（硬规则）**：页面根节点必须写 `data-surface="fullscreen|modal|hud"`，再按 [unity-layout-attributes.md](references/unity-layout-attributes.md) 的矩阵建结构：
+
+- `fullscreen`：根 `Bg`（显式真实全屏背景）+ 内容；禁止 `Window`。
+- `modal`：**根节点禁止 `Bg`**（整屏背景由自动注入的 `Screen` 提供）；`Window` 下必须有 `WindowBg`/`Bg`，并显式写标准窗框贴图。
+- `hud`：禁止 `Bg`、禁止 `Window`。
+
+`Bg`/`WindowBg` 不允许依赖配方默认占位图，禁止 `jh_frame_08`。标题/正文颜色必须跟随 surface：浅色框用深色文字，深色底用浅色文字；不要假设生成器注入的深色 Window Image 是最终底框。
 
 生成规则：
 
@@ -175,7 +186,8 @@ MixGrowthFundPage.cs (BaseActivityPage):
 6. 视觉细节（图片、圆角、渐变、阴影）不翻译；配套 CSS 只用于基础预览识别。
 7. **只有 Page 根节点**画布尺寸固定 `data-size="(1920, 1080)"`；嵌套组件容器根据实际需要设置尺寸。
 8. **先读步骤 2.5/2.6 的 `reference-notes.md` 和 `ui-style-profile.md`**：结构、命名、组件组合以参考 Prefab 为依据；样式优先同功能参考，其次模块档案的角色值，最后 `data-lr-style`/白名单默认值。模块档案存在时，给标题/正文/价格/按钮/窗口框/分割线/遮罩节点写 `data-role`（角色白名单见 [unity-layout-attributes.md](references/unity-layout-attributes.md)），不要手工抄 profile 数值。
-   - 弹窗底框单独画：在 `Window` 下增加一个 `Bg` 节点，`data-component="content.async-image"` + `data-role="window.frame"`，由 profile 提供 texture；不要把 `Window` 容器本身当作底框。底框节点已有 RawImage 时生成器不会再注入深色占位 Image。
+   - 弹窗窗框单独画：在 `Window` 下增加 `WindowBg`（或 `Bg`）节点，显式写标准窗框 `data-texture`（大框 `ty_tk_frame_04`、小框 `ty_tk_frame_06`）或 `data-sprite`；不要把 `Window` 容器本身当作底框，也不要在弹窗根节点再铺整屏 `Bg`。
+   - 全屏背景必须显式写真实贴图；`jh_frame_08` 是装饰框，不能作为背景/窗框。
    - 参考 Prefab 有分割线时，画 `data-component="content.divider"` + `data-role="divider"` 节点；不要省略。
 9. **具体样式覆盖只用于 `data-role`/命名变体表达不了的差异**：使用 `data-font-size`/`data-color`/`data-font`/`data-font-material`/`data-sprite`/`data-image-type`/`data-texture`/`data-image-color`/`data-preserve-aspect` 时，必须在 `reference-notes.md` 记录理由；每个覆盖属性必须能作用于真实组件（见 [unity-layout-attributes.md](references/unity-layout-attributes.md) 的目标规则）。
 10. **`data-color` 优先作为文本颜色**；无文本目标时作为图片颜色别名，`data-name="Screen"` 的遮罩节点映射到生成的 Screen Image 颜色；图片颜色仍优先显式写 `data-image-color`。`data-text-align` 与 `data-vertical-align` 可以单独使用（单独使用时保留另一轴），同时写则两者都覆盖；`RawImage` 支持 `data-image-color` 和 `data-texture`。
@@ -191,7 +203,9 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/validate_unity_layout.py \
   --csharp <path/to/GrowthFundRewardCell.cs>
 ```
 
-校验内容（详见脚本头部注释）：TSX 解析、`data-name` 唯一性、组件白名单、必填 `data-pos`/`data-size`、枚举值合法性、越界与重叠检测、**字段完整性**（每个可由 FieldBinder 绑定的引用字段都必须有对应 `data-field`；普通字段只能绑定一次，数组逐元素绑定，重复 Cell 在各自作用域检查；数值、字符串及纯数据类不强求 GameObject 绑定），以及**样式覆盖契约**：`data-lr-style` 变体必须存在、文本/图片覆盖必须有可消费目标、字体/材质/贴图路径前缀合法、颜色为 4 个 0..1 分量、`data-text-align`/`data-vertical-align` 成对出现、`RawImage` 只接受 `data-image-color`。
+校验内容（详见脚本头部注释）：TSX 解析、`data-name` 唯一性、组件白名单、必填 `data-pos`/`data-size`、枚举值合法性、越界与重叠检测、**页面结构契约**（按 `data-surface` 检查 fullscreen/modal/hud 的 Bg/Window/WindowBg 结构；`Bg`/`WindowBg` 必须显式资源，禁止 `jh_frame_08`）、**字段完整性**（每个可由 FieldBinder 绑定的引用字段都必须有对应 `data-field`；普通字段只能绑定一次，数组逐元素绑定，重复 Cell 在各自作用域检查；数值、字符串及纯数据类不强求 GameObject 绑定），以及**样式覆盖契约**：`data-lr-style` 变体必须存在、文本/图片覆盖必须有可消费目标、字体/材质/贴图路径前缀合法、颜色为 4 个 0..1 分量、`data-text-align`/`data-vertical-align` 成对出现、`RawImage` 只接受 `data-image-color`。
+
+目录模式现在按 TSX 文件分组，每个文件只用它自己的根类 + 嵌套 `data-lr-component` 对应 C# 做字段检查，不再跨面板合并。仍建议同时传入所有相关 C#，由脚本自动筛选。
 
 字段解析支持附加/合并 attribute 及非 `m_` 名称。数组在 TSX、JSON 两级均拒绝空洞和重复下标；类型核对只认同节点的配方组件、后处理产物和显式挂载组件，不把子节点组件当作根节点组件。`List<T>` 等不支持的集合显式绑定报错。提供的 C# 可用于解析自定义继承；输出“需 MCP 验证”的项目，以及已有 Prefab 引用、未提供完整继承链的类型，必须在步骤 7.5 核对真实对象类型与磁盘序列化引用，不能将静态通过当成绑定已完成。
 
@@ -221,6 +235,7 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/deploy_lr_ui_gen.py <unity-p
 
 1. 调用 `mcp__ai-game-developer__assets-refresh` 让 Unity 感知新文件
 2. 轮询 `mcp__ai-game-developer__editor-application-get-state` 直到 `IsCompiling: false`（不要在编译中调用步骤 7 的生成器，会拿到未编译完成的旧类型或直接调用失败）
+3. **配方 smoke test（建议每次改配方后执行）**：用 `reflection-method-find` 查找 `LRUIPrefabGen.LRRecipeSmokeTest.Run`，传输出 JSON 绝对路径调用；`failed > 0` 时先修配方，不得继续生成业务 Prefab。该测试会遍历全部 ComponentRecipes，在临时 GameObject 上 Apply 一次，提前发现类型/属性/后处理错误。
 
 ### 步骤 7：调用 Unity 生成器
 
@@ -233,6 +248,8 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/deploy_lr_ui_gen.py <unity-p
 
 一个 Prefab 一次调用，内部循环建树、加组件、绑字段全部在这一次 C# 执行里完成，AI 不逐节点操作。`rootScriptTypeName` 传 `null` 表示只生成层级不挂脚本（用于 Cell 类不需要挂根脚本的场景，字段绑定改为在父 Prefab 生成时通过 `data-prefab-asset-path` 整体引用）。
 
+**试点门禁（批量前必做）**：先只生成 1 个代表性面板（通常是主界面），用临时 additive 场景 + `CanvasScaler` + 正交相机截图，与 `reference-notes.md` 的参考截图/参考 Prefab 同场景截图对比：背景、窗框、标题/正文颜色、主按钮。不通过就回步骤 3 改 TSX，不得批量生成其余面板；通过后再逐个生成。截图时临时补 `CanvasScaler`（Prefab 本身不带，运行时由 UIModule 注入），完成后卸载临时场景并删除临时资产。
+
 ### 步骤 7.5：验证结果（优先 MCP）
 
 生成 Prefab 后，必须执行以下验证步骤：
@@ -244,14 +261,13 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/deploy_lr_ui_gen.py <unity-p
 **检查项**：
 - ✅ 根节点名称正确（与类名一致，如 `MonthCardGiftPanel`）
 - ✅ 根节点有 Canvas + GraphicRaycaster + 脚本组件
-- ✅ 符合项目标准结构（对于 Panel）：
+- ✅ 符合 `data-surface` 对应的标准结构：
   ```
-  XxxPanel (根节点)
-  ├── Screen (遮罩层)
-  └── Window (弹窗容器)
-      └── Root (内容容器)
-          └── 实际UI元素
+  fullscreen: XxxPanel (根) -> Screen -> Bg -> 内容
+  modal:      XxxPanel (根) -> Screen -> Window -> WindowBg -> 内容
+  hud:        XxxPanel (根) -> Screen -> HUD 元素（无 Bg/Window）
   ```
+- ✅ `modal` 根节点没有整屏 `Bg`；`fullscreen` 根节点有真实 `Bg`；`Bg`/`WindowBg` 不是 `jh_frame_08`。
 - ✅ 所有命名节点（data-name）都存在
 
 **示例命令**：
@@ -435,7 +451,7 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/unity_cli_wrapper.py <SE工�
 
 ## 版本信息
 
-**版本**: v2.5（SE：MCP 优先，CLI 可选兜底）（TSX 中间格式 + 参考侦察 + 角色化 style profile + 命名/节点级样式覆盖 + 资源/字段自动修复 + 保存后字段引用核验 + fail-closed 生成与核验报告）
+**版本**: v2.6（SE：MCP 优先，CLI 可选兜底）（在 v2.5 基础上新增：data-surface 页面结构契约、Bg/WindowBg 显式资源与 denylist、参考截图/试点门禁、逐文件字段校验、保存后类型断言、配方 smoke test）
 
 **依赖 SKILL**：
   - `/lr-design`——生成并验收 Web 原型，产出 `unity-ui-components.md` 白名单
@@ -443,7 +459,7 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/unity_cli_wrapper.py <SE工�
 
 **依赖工具**：
   - ai-game-developer MCP（Unity 插件）
-  - 临时部署的生成器源码：`LRUnityLayoutPrefabGenerator.cs`、`LRUnityLayoutCLI.cs`、`LRComponentRecipes.cs`、`LRFieldBinder.cs`、`ComponentRecipeLoader.cs`、`LRPrefabReferenceScanner.cs`（namespace `LRUIPrefabGen`）。唯一真相源是本技能的 `scripts/lr_ui_gen/`，参考侦察/生成时部署至 `Assets/Editor/LRUIPrefabGen/`，完成后按步骤 8 清理。
+  - 临时部署的生成器源码：`LRUnityLayoutPrefabGenerator.cs`、`LRUnityLayoutCLI.cs`、`LRComponentRecipes.cs`、`LRFieldBinder.cs`、`ComponentRecipeLoader.cs`、`LRPrefabReferenceScanner.cs`、`LRRecipeSmokeTest.cs`（namespace `LRUIPrefabGen`）。唯一真相源是本技能的 `scripts/lr_ui_gen/`，参考侦察/生成时部署至 `Assets/Editor/LRUIPrefabGen/`，完成后按步骤 8 清理。
   - `LRUnityLayoutCLI.cs` 是可选 CLI 备用入口；默认仍通过 ai-game-developer MCP 调用生成器。
 
 **依赖配置**：

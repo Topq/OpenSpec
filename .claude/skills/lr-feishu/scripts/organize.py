@@ -77,6 +77,66 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
     return meta, body
 
 
+def heading_level(line: str) -> int:
+    match = re.match(r"^(#{1,6})\s", line)
+    return len(match.group(1)) if match else 0
+
+
+def normalize_heading_levels(body: str, title_hint: str = "") -> str:
+    """把顶层章节不是标题 1 的文档按相对层级上提。
+
+    飞书文档常用「标题 2」写一级章节；parse_chapters 只认 H1 为章节，
+    不先归一化会把整篇内容都塞进“其他”。这里以文档标题（首个 H1）为基准，
+    把其后最浅的标题层级上提为 H1，更深层级同比上提。已是 H1 结构的文档原样返回。
+    """
+    lines = body.splitlines()
+    headings: list[tuple[int, int]] = []
+    in_fence = False
+    for index, line in enumerate(lines):
+        if line.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        level = heading_level(line)
+        if level:
+            headings.append((index, level))
+
+    if not headings:
+        return body
+
+    first_index, first_level = headings[0]
+    has_title = first_level == 1
+    section_levels = [level for index, level in headings if not (has_title and index == first_index)]
+    if not section_levels:
+        return body
+
+    min_level = min(section_levels)
+    if min_level <= 1:
+        return body
+
+    shift = min_level - 1
+    out: list[str] = []
+    if not has_title:
+        out.extend([f"# {title_hint.strip() or '文档'}", ""])
+
+    in_fence = False
+    for index, line in enumerate(lines):
+        if line.startswith("```"):
+            in_fence = not in_fence
+            out.append(line)
+            continue
+        if in_fence:
+            out.append(line)
+            continue
+        level = heading_level(line)
+        if level and not (has_title and index == first_index):
+            line = "#" * (level - shift) + line[level:]
+        out.append(line)
+
+    return "\n".join(out)
+
+
 def parse_chapters(body: str) -> tuple[str, list[Chapter]]:
     """按 H1/H2 解析。第一个 H1 是文档标题，其余 H1 是章节。"""
     chapters: list[Chapter] = []
@@ -316,6 +376,7 @@ def organize_document(
     source: str,
 ) -> list[str]:
     meta, body = split_frontmatter(markdown)
+    body = normalize_heading_levels(body, meta.get("title", ""))
     doc_title, chapters = parse_chapters(body)
     meta.setdefault("title", doc_title or "未命名文档")
 
