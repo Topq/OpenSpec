@@ -271,6 +271,8 @@ namespace LRUIPrefabGen
                 ["text"] = text.text,
                 ["fontSize"] = text.fontSize,
                 ["color"] = ColorArray(text.color),
+                ["outlineColor"] = ColorArray(text.outlineColor),
+                ["faceColor"] = ColorArray(text.faceColor),
                 ["font"] = AssetPath(text.font),
                 ["fontMaterial"] = AssetPath(text.fontSharedMaterial),
                 ["alignment"] = text.alignment.ToString(),

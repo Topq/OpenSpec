@@ -82,11 +82,24 @@ image:
 # 按钮文字 (TextMeshProUGUI 组件)
 text:
   font: Assets/Resources/Font/fzhjtSDF.asset
-  fontSharedMaterial: Assets/Resources/Font/fzhjtSDF_UI_OutLine1Px.mat  # 按钮文字带 1px 描边
+  fontSharedMaterial: Assets/Resources/Font/fzhjtSDF_UI_OutLine1Px.mat  # 只提供描边宽度，真实描边色见下方说明
   fontSize: 24
   color: "#FFFFFF"
   alignment: Center
 ```
+
+**字体材质与描边（重要）**：材质只提供 `_OutlineWidth` / `_FaceDilate` 等默认值，**最终描边颜色由每个 TMP 的 `m_outlineColor` 决定**（本项目 `TMP_SDFLR.shader` 用顶点通道乘材质 `_OutlineColor`）。生成器通过 `data-outline-color` 写入该字段：
+
+| 材质 | `_OutlineWidth` | `_FaceDilate` | 用途 |
+|---|---|---|---|
+| `fzhjtSDF_UI_Default` | 0.02 | 0 | 无描边正文 |
+| `fzhjtSDF_UI_OutLine1Px` | 0.4 | 0.4 | 细描边 |
+| `fzhjtSDF_UI_OutLine2Px` | 1.3 | 1 | 粗描边（**必须配 `data-outline-color`**） |
+| `fzhjtSDF_UI_TitleLine` | 0.25 | 0.15 | 标题线 |
+| `ssfttSDF_UI_OutLine2` | 1.3 | 1 | 粗描边（**必须配 `data-outline-color`**） |
+| `ssfttSDF_UI_NoOutLine` | 0.02 | 0 | 无描边 |
+
+参考现网取值：金色标题 `(60,27,8,255)`、白色正文 `(59,26,7,255)`、小号文字 `(24,43,67,255)`、ssftt 金色按钮 `(52,17,3,255)`、ssftt 白色按钮 `(6,50,48,255)`。不写 `data-outline-color` 时渲染为白色粗描边，字内孔会闭合。
 
 **Web 原型示例**：
 ```html

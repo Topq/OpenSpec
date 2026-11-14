@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using Newtonsoft.Json.Linq;
 using TMPro;
 using UnityEditor;
@@ -94,7 +95,7 @@ namespace LRUIPrefabGen
 
         static readonly string[] TextOverrideKeys =
         {
-            "fontSize", "font", "fontMaterial", "textAlign", "verticalAlign",
+            "fontSize", "font", "fontMaterial", "outlineColor", "textAlign", "verticalAlign",
         };
 
         static readonly string[] ImageOverrideKeys =
@@ -173,6 +174,20 @@ namespace LRUIPrefabGen
                         throw new Exception($"样式覆盖 data-font-material 指向的材质不存在: {materialPath} ({go.name})");
                     }
                     tmp.fontSharedMaterial = material;
+                }
+
+                // 描边色必须落在 TMP 的序列化字段上：本项目 TMP 的
+                // SetOutlineColor 已被禁用（不建材质实例），轮廓色由
+                // TMP_SDFLR.shader 从顶点 uv3/uv4 读取，而 uv3/uv4 正是
+                // 由 m_outlineColor 生成的（TMP_Text.GetOutlineColor）。
+                if (node["outlineColor"] != null)
+                {
+                    Color? outline = ReadColor(node["outlineColor"]);
+                    if (!outline.HasValue)
+                    {
+                        throw new Exception($"样式覆盖 data-outline-color 必须是 4 个数值: {go.name}");
+                    }
+                    ApplyOutlineColor(tmp, outline.Value, go.name);
                 }
 
                 string horizontal = (string)node["textAlign"];
@@ -334,6 +349,28 @@ namespace LRUIPrefabGen
                 count++;
             }
             return count == 1 ? singleChild : null;
+        }
+
+        /// <summary>
+        /// 直接写 TMP_Text.m_outlineColor，不调用 tmp.outlineColor setter：
+        /// setter 在标准 TMP 里会创建 per-object 材质实例，破坏现网
+        /// "m_fontMaterial 为空 + 顶点色乘材质色" 的约定。
+        /// </summary>
+        static void ApplyOutlineColor(TextMeshProUGUI tmp, Color color, string nodeName)
+        {
+            FieldInfo field = typeof(TMP_Text).GetField(
+                "m_outlineColor", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (field == null)
+            {
+                throw new Exception(
+                    $"[ComponentRecipes] TMP_Text.m_outlineColor 字段不存在，无法应用 data-outline-color: {nodeName}");
+            }
+            field.SetValue(tmp, new Color32(ToByte(color.r), ToByte(color.g), ToByte(color.b), ToByte(color.a)));
+        }
+
+        static byte ToByte(float value)
+        {
+            return (byte)Mathf.RoundToInt(Mathf.Clamp01(value) * 255f);
         }
 
         static Color? ReadColor(JToken token)

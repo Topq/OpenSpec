@@ -85,7 +85,7 @@ IMAGE_TYPE_VALUES = {"Simple", "Sliced", "Tiled", "Filled"}
 FONT_ROOT = "Assets/Resources/Font/"
 TEXT_STYLE_ATTRS = (
     "data-font-size", "data-color", "data-font", "data-font-material",
-    "data-text-align", "data-vertical-align",
+    "data-outline-color", "data-text-align", "data-vertical-align",
 )
 IMAGE_STYLE_ATTRS = (
     "data-sprite", "data-image-type", "data-image-color", "data-preserve-aspect",
@@ -569,7 +569,7 @@ def validate_file(
                         f"{loc(node)} <{node.tag} data-name={name}> data-font-size 必须在 (0, 200] 范围内: {font_size}"
                     )
 
-        for color_attr in ("data-color", "data-image-color"):
+        for color_attr in ("data-color", "data-image-color", "data-outline-color"):
             color_value = node.attr(color_attr)
             if color_value is None:
                 continue

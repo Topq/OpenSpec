@@ -303,6 +303,8 @@ namespace LRUIPrefabGen
                 ["fontMaterial"] = AssetPath(text.fontSharedMaterial),
                 ["fontSize"] = text.fontSize,
                 ["color"] = ColorArray(text.color),
+                ["outlineColor"] = ColorArray(text.outlineColor),
+                ["faceColor"] = ColorArray(text.faceColor),
                 ["alignment"] = text.alignment.ToString(),
                 ["fontStyle"] = text.fontStyle.ToString(),
                 ["characterSpacing"] = text.characterSpacing,

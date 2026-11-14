@@ -19,13 +19,43 @@ from style_profile_contract import STYLE_ROLES
 FIELD = re.compile(r"^[A-Za-z_]\w*(?:\[\d+\])?$")
 VECTOR_LENGTHS = {"pos": (2, 3), "size": (2,), "anchors": (4,),
                   "anchorMin": (2,), "anchorMax": (2,), "pivot": (2,),
-                  "layoutPadding": (4,), "color": (4,), "imageColor": (4,)}
+                  "layoutPadding": (4,), "color": (4,), "imageColor": (4,),
+                  "outlineColor": (4,)}
 IMAGE_TYPE_VALUES = {"Simple", "Sliced", "Tiled", "Filled"}
 FONT_ROOT = "Assets/Resources/Font/"
 STYLE_KEYS = {
-    "fontSize", "color", "font", "fontMaterial", "textAlign", "verticalAlign",
+    "fontSize", "color", "font", "fontMaterial", "outlineColor",
+    "textAlign", "verticalAlign",
     "sprite", "imageType", "imageColor", "preserveAspect", "texture",
 }
+
+# 字体材质只提供描边宽度（_OutlineWidth），最终描边色由每个 TMP 的
+# m_outlineColor 决定。粗描边材质漏写 outlineColor 会渲染成材质默认的
+# 白色粗描边，字内孔被糊死。宽度从 .mat 读取，不按文件名判断
+# （ssfttSDF_UI_ShadowOutLine2 名字带 OutLine2 但只有 0.201）。
+OUTLINE_ERROR_WIDTH = 1.0
+OUTLINE_WARN_WIDTH = 0.2
+OUTLINE_WIDTH_RE = re.compile(
+    r"_OutlineWidth:\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)")
+_OUTLINE_WIDTH_CACHE: dict[str, float | None] = {}
+
+
+def _outline_width(material_path: Path) -> float | None:
+    key = material_path.as_posix()
+    if key not in _OUTLINE_WIDTH_CACHE:
+        width: float | None = None
+        try:
+            match = OUTLINE_WIDTH_RE.search(
+                material_path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            match = None
+        if match:
+            try:
+                width = float(match.group(1))
+            except ValueError:
+                width = None
+        _OUTLINE_WIDTH_CACHE[key] = width
+    return _OUTLINE_WIDTH_CACHE[key]
 
 
 PAGE_ROOT_COMPONENTS = {"surface.panel", "surface.modal"}
@@ -105,8 +135,10 @@ def _check_surface_contract(data: dict, errors: list[str]) -> None:
         errors.append("root: hud 根节点不应有 Window")
 
 
-def validate_layout_json(json_path: Path, project_root: Path | None = None) -> tuple[bool, list[str]]:
+def validate_layout_json(json_path: Path, project_root: Path | None = None,
+                         warnings: list[str] | None = None) -> tuple[bool, list[str]]:
     errors: list[str] = []
+    warning_sink = warnings if warnings is not None else []
     try:
         data = json.loads(json_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -180,7 +212,7 @@ def validate_layout_json(json_path: Path, project_root: Path | None = None) -> t
             if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
                 errors.append(f"{path}: fontSize 必须是有限正数")
 
-        for key in ("color", "imageColor"):
+        for key in ("color", "imageColor", "outlineColor"):
             value = node.get(key)
             if isinstance(value, list) and value and any(
                     type(x) not in (int, float) or not math.isfinite(x) or x < 0 or x > 1 for x in value):
@@ -196,6 +228,21 @@ def validate_layout_json(json_path: Path, project_root: Path | None = None) -> t
                 asset_path = project_root / value.replace("\\", "/")
                 if not asset_path.is_file():
                     errors.append(f"{path}: {key} 指向的资源不存在: {value}")
+
+        font_material = node.get("fontMaterial")
+        if (project_root is not None and isinstance(font_material, str)
+                and font_material.startswith(FONT_ROOT) and "outlineColor" not in node):
+            width = _outline_width(project_root / font_material.replace("\\", "/"))
+            if width is not None and width >= OUTLINE_WARN_WIDTH:
+                message = (
+                    f"{path}: 字体材质 {Path(font_material).name} 的 "
+                    f"_OutlineWidth={width:g}，必须同时写 outlineColor"
+                    f"（TSX 用 data-outline-color），否则渲染成材质默认的白色粗描边，字内孔会糊死"
+                )
+                if width >= OUTLINE_ERROR_WIDTH:
+                    errors.append(message)
+                else:
+                    warning_sink.append(message)
 
         if isinstance(node.get("field"), str):
             if any(not FIELD.fullmatch(field.strip()) for field in node["field"].split(",")):
@@ -241,9 +288,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("layout", type=Path, help="tsx_to_json 输出的节点树 JSON")
     parser.add_argument("--project-root", type=Path, default=None,
-                        help="Unity 项目根目录；提供时校验 font/fontMaterial/sprite/texture 真实存在")
+                        help="Unity 项目根目录；提供时校验 font/fontMaterial/sprite/texture 真实存在，"
+                             "并读取材质 _OutlineWidth 校验粗描边材质必须带 outlineColor")
     args = parser.parse_args()
-    ok, errors = validate_layout_json(args.layout, project_root=args.project_root)
+    warnings: list[str] = []
+    ok, errors = validate_layout_json(args.layout, project_root=args.project_root,
+                                      warnings=warnings)
+    for warning in warnings:
+        print(f"警告: {warning}", file=sys.stderr)
     if not ok:
         for error in errors:
             print(error, file=sys.stderr)

@@ -33,6 +33,7 @@ NUMERIC_ATTRS = {
     "data-pivot": "pivot",
     "data-color": "color",
     "data-image-color": "imageColor",
+    "data-outline-color": "outlineColor",
     "data-layout-padding": "layoutPadding",
 }
 

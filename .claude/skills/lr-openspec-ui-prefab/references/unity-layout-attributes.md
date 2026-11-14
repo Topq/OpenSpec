@@ -107,6 +107,7 @@
 | `data-color` | 文本颜色；无 TMP 时作为 Image/RawImage 颜色别名；`data-name="Screen"` 遮罩节点映射到生成的 Screen Image 颜色 | `data-color="(1, 0.84, 0, 1)"` |
 | `data-font` | TMP 字体资产；必须位于 `Assets/Resources/Font/` | `data-font="Assets/Resources/Font/fzhjtSDF.asset"` |
 | `data-font-material` | TMP 字体材质；必须位于 `Assets/Resources/Font/` | `data-font-material="Assets/Resources/Font/fzhjtSDF_UI_TitleLine.mat"` |
+| `data-outline-color` | TMP 描边色，四值归一化 RGBA，写入 `m_outlineColor`（不创建材质实例） | `data-outline-color="(0.235294, 0.105882, 0.031373, 1)"` |
 | `data-text-align` | 水平对齐；可单独使用，单独使用时保留另一轴 | `Center` |
 | `data-vertical-align` | 垂直对齐；可单独使用，单独使用时保留另一轴 | `Middle` |
 | `data-sprite` | Image 贴图；必须以 `Assets/` 开头 | `data-sprite="Assets/UI/AtlasResources/CommonPanel/ty_btn_11.png"` |
@@ -118,6 +119,7 @@
 **目标规则**：
 
 - 文本覆盖作用于节点自身的 TMP，或该节点唯一一个直接 TMP 子节点。`control.button` 自动生成的 `Text` 子节点、`template.tab-item` 的 `Label` 子节点都符合；有多个 TMP 子节点时必须把覆盖写到具体的文本节点上。
+- **材质 ≠ 最终描边**：字体材质里的 `_OutlineColor` 只是乘数默认值，真实描边色来自每个 TMP 的 `m_outlineColor`。使用 `*_OutLine1Px` / `*_OutLine2` / `*_OutLine2Px` 这类带描边宽度的材质时，必须显式写 `data-outline-color`，否则渲染成材质默认的白色粗描边（字内孔会糊死）。
 - 图片覆盖作用于节点自身的 `Image`。`RawImage` 支持 `data-image-color` 和 `data-texture`；写 `data-sprite`/`data-image-type`/`data-preserve-aspect` 会报错。
 - `data-color` 优先作为文本颜色；节点没有 TMP 但有 Image/RawImage 时按图片颜色处理；`data-name="Screen"` 的遮罩节点由生成器注入的 Screen Image 消费。按钮同时有文本和图片时，`data-color` 是文本颜色，图片颜色请用 `data-image-color`。
 - 每个覆盖必须有可消费的目标；没有目标时校验器报错，生成器也拒绝生成，不会静默忽略。

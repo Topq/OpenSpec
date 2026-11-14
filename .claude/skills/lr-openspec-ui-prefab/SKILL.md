@@ -124,6 +124,7 @@ MixGrowthFundPage.cs (BaseActivityPage):
    - 结构结论：骨架、命名、组件组合、模板位置；
    - **Surface 证据（必填）**：每个参考的 `Bg`/`WindowBg` 节点、组件类型（Image/RawImage/AsyncTexture）、贴图路径、Image type/color/size；数据直接取自 `references.json`。没有同功能参考时明确写"未做实时参考"；
    - **参考截图**：至少一张参考 Prefab 自身截图（或说明无法截图的理由）；截图是判断浅色框/深色框、文字颜色的硬证据，不能只看结构；
+   - **文本描边色（必填）**：每个文本角色的描边色，取自 `references.json` 的 `outlineColor`；使用 `*_OutLine1Px` / `*_OutLine2` / `*_OutLine2Px` 等带描边宽度的材质时，步骤 3 必须据此写 `data-outline-color`；
    - 样式映射：角色 → `data-lr-style` 或具体覆盖值；
    - 每个具体覆盖的理由；
    - 未决/冲突/低置信度项。
@@ -189,7 +190,7 @@ MixGrowthFundPage.cs (BaseActivityPage):
    - 弹窗窗框单独画：在 `Window` 下增加 `WindowBg`（或 `Bg`）节点，显式写标准窗框 `data-texture`（大框 `ty_tk_frame_04`、小框 `ty_tk_frame_06`）或 `data-sprite`；不要把 `Window` 容器本身当作底框，也不要在弹窗根节点再铺整屏 `Bg`。
    - 全屏背景必须显式写真实贴图；`jh_frame_08` 是装饰框，不能作为背景/窗框。
    - 参考 Prefab 有分割线时，画 `data-component="content.divider"` + `data-role="divider"` 节点；不要省略。
-9. **具体样式覆盖只用于 `data-role`/命名变体表达不了的差异**：使用 `data-font-size`/`data-color`/`data-font`/`data-font-material`/`data-sprite`/`data-image-type`/`data-texture`/`data-image-color`/`data-preserve-aspect` 时，必须在 `reference-notes.md` 记录理由；每个覆盖属性必须能作用于真实组件（见 [unity-layout-attributes.md](references/unity-layout-attributes.md) 的目标规则）。
+9. **具体样式覆盖只用于 `data-role`/命名变体表达不了的差异**：使用 `data-font-size`/`data-color`/`data-font`/`data-font-material`/`data-outline-color`/`data-sprite`/`data-image-type`/`data-texture`/`data-image-color`/`data-preserve-aspect` 时，必须在 `reference-notes.md` 记录理由；每个覆盖属性必须能作用于真实组件（见 [unity-layout-attributes.md](references/unity-layout-attributes.md) 的目标规则）。**字体材质只提供描边宽度，最终描边色由每个 TMP 的 `m_outlineColor` 决定**：只要 `data-font-material` 指向 `*_OutLine1Px` / `*_OutLine2` / `*_OutLine2Px`，必须同时写 `data-outline-color`；不写会渲染成材质默认的白色粗描边，字内孔糊死，步骤 5 会阻断。
 10. **`data-color` 优先作为文本颜色**；无文本目标时作为图片颜色别名，`data-name="Screen"` 的遮罩节点映射到生成的 Screen Image 颜色；图片颜色仍优先显式写 `data-image-color`。`data-text-align` 与 `data-vertical-align` 可以单独使用（单独使用时保留另一轴），同时写则两者都覆盖；`RawImage` 支持 `data-image-color` 和 `data-texture`。
 
 发现 React 原型与 C# 字段之间存在结构性矛盾时（比如脚本要三个领取按钮但原型只有一个入口），停止生成，回报使用者，不静默拍板改设计。参考 Prefab 之间、或参考与原型之间的**样式**冲突无法用命名样式解释时，不阻断：按同功能参考 > 模块档案 > 白名单默认值取舍，并把冲突和取舍写进 `reference-notes.md`。
@@ -203,7 +204,7 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/validate_unity_layout.py \
   --csharp <path/to/GrowthFundRewardCell.cs>
 ```
 
-校验内容（详见脚本头部注释）：TSX 解析、`data-name` 唯一性、组件白名单、必填 `data-pos`/`data-size`、枚举值合法性、越界与重叠检测、**页面结构契约**（按 `data-surface` 检查 fullscreen/modal/hud 的 Bg/Window/WindowBg 结构；`Bg`/`WindowBg` 必须显式资源，禁止 `jh_frame_08`）、**字段完整性**（每个可由 FieldBinder 绑定的引用字段都必须有对应 `data-field`；普通字段只能绑定一次，数组逐元素绑定，重复 Cell 在各自作用域检查；数值、字符串及纯数据类不强求 GameObject 绑定），以及**样式覆盖契约**：`data-lr-style` 变体必须存在、文本/图片覆盖必须有可消费目标、字体/材质/贴图路径前缀合法、颜色为 4 个 0..1 分量、`data-text-align`/`data-vertical-align` 成对出现、`RawImage` 只接受 `data-image-color`。
+校验内容（详见脚本头部注释）：TSX 解析、`data-name` 唯一性、组件白名单、必填 `data-pos`/`data-size`、枚举值合法性、越界与重叠检测、**页面结构契约**（按 `data-surface` 检查 fullscreen/modal/hud 的 Bg/Window/WindowBg 结构；`Bg`/`WindowBg` 必须显式资源，禁止 `jh_frame_08`）、**字段完整性**（每个可由 FieldBinder 绑定的引用字段都必须有对应 `data-field`；普通字段只能绑定一次，数组逐元素绑定，重复 Cell 在各自作用域检查；数值、字符串及纯数据类不强求 GameObject 绑定），以及**样式覆盖契约**：`data-lr-style` 变体必须存在、文本/图片覆盖必须有可消费目标、字体/材质/贴图路径前缀合法、颜色为 4 个 0..1 分量、`data-text-align`/`data-vertical-align` 成对出现、`RawImage` 只接受 `data-image-color`，以及**描边配对契约**：提供 `--project-root` 时读取字体材质真实 `.mat` 的 `_OutlineWidth`，粗描边材质（≥1.0）缺 `outlineColor` 直接报错、0.2–1.0 告警。
 
 目录模式现在按 TSX 文件分组，每个文件只用它自己的根类 + 嵌套 `data-lr-component` 对应 C# 做字段检查，不再跨面板合并。仍建议同时传入所有相关 C#，由脚本自动筛选。
 
@@ -248,7 +249,7 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/deploy_lr_ui_gen.py <unity-p
 
 一个 Prefab 一次调用，内部循环建树、加组件、绑字段全部在这一次 C# 执行里完成，AI 不逐节点操作。`rootScriptTypeName` 传 `null` 表示只生成层级不挂脚本（用于 Cell 类不需要挂根脚本的场景，字段绑定改为在父 Prefab 生成时通过 `data-prefab-asset-path` 整体引用）。
 
-**试点门禁（批量前必做）**：先只生成 1 个代表性面板（通常是主界面），用临时 additive 场景 + `CanvasScaler` + 正交相机截图，与 `reference-notes.md` 的参考截图/参考 Prefab 同场景截图对比：背景、窗框、标题/正文颜色、主按钮。不通过就回步骤 3 改 TSX，不得批量生成其余面板；通过后再逐个生成。截图时临时补 `CanvasScaler`（Prefab 本身不带，运行时由 UIModule 注入），完成后卸载临时场景并删除临时资产。
+**试点门禁（批量前必做）**：先只生成 1 个代表性面板（通常是主界面），用临时 additive 场景 + `CanvasScaler` + 正交相机截图，与 `reference-notes.md` 的参考截图/参考 Prefab 同场景截图对比：背景、窗框、标题/正文颜色、主按钮、文本描边（字内孔是否可见，有无白粗边）。不通过就回步骤 3 改 TSX，不得批量生成其余面板；通过后再逐个生成。截图时临时补 `CanvasScaler`（Prefab 本身不带，运行时由 UIModule 注入），完成后卸载临时场景并删除临时资产。
 
 ### 步骤 7.5：验证结果（优先 MCP）
 
