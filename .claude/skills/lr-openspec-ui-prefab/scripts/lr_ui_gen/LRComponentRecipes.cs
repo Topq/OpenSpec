@@ -83,6 +83,20 @@ namespace LRUIPrefabGen
             {
                 group.childAlignment = anchor;
             }
+
+            // Unity 默认 childForceExpand*=true：固定高度的父容器里会把剩余空间均分给子项，
+            // 子项自身高度不变，导致行间距被拉大、末行超出 Content。
+            var forceExpandWidth = node["layoutChildForceExpandWidth"];
+            if (forceExpandWidth != null)
+            {
+                group.childForceExpandWidth = (bool)forceExpandWidth;
+            }
+
+            var forceExpandHeight = node["layoutChildForceExpandHeight"];
+            if (forceExpandHeight != null)
+            {
+                group.childForceExpandHeight = (bool)forceExpandHeight;
+            }
         }
 
         // ------------------------------------------------------------------
@@ -1065,7 +1079,9 @@ namespace LRUIPrefabGen
 
         /// <summary>
         /// SingleScrollView 组件的后处理钩子：创建完整的滚动列表层级结构
-        /// 包括 LR.SingleScrollView（根节点）、Viewport（遮罩）、Content 和 Scrollbar
+        /// 包括 LR.SingleScrollView（根节点）、Viewport（遮罩 + 拖拽命中层）、Content。
+        /// 默认竖向；节点带 data-scroll-direction="horizontal" 时生成横向列表。
+        /// 项目 UI 风格不使用 Scrollbar 节点，横向/竖向都只靠拖拽滚动。
         /// </summary>
         static void PostProcessSingleScrollView(GameObject go, JObject node)
         {
@@ -1083,8 +1099,10 @@ namespace LRUIPrefabGen
                     $"[ComponentRecipes] 未找到 LR.SingleScrollView 类型（GameObject={go.name}），无法生成列表");
             }
 
-            scrollRect.horizontal = false;
-            scrollRect.vertical = true;
+            bool horizontal = string.Equals((string)node?["scrollDirection"], "horizontal", StringComparison.OrdinalIgnoreCase);
+
+            scrollRect.horizontal = horizontal;
+            scrollRect.vertical = !horizontal;
             scrollRect.scrollSensitivity = 1f;
             scrollRect.movementType = ScrollRect.MovementType.Elastic;
 
@@ -1100,53 +1118,35 @@ namespace LRUIPrefabGen
             var viewportMask = viewport.AddComponent<RectMask2D>();
             scrollRect.viewport = viewportRect;
 
+            // Viewport 同时是拖拽命中面：列表项若全是 TMP（生成器默认 raycastTarget=false），
+            // 整块区域就没有任何 Graphic 能接收指针事件，ScrollRect 收不到 beginDrag/drag，
+            // 表现为“内容超出但手动拖不动”（只有滚动条能滚）。透明 Image 只负责命中。
+            var viewportRaycast = (Image)AddComponentWithRequirements(viewport, typeof(Image));
+            viewportRaycast.color = new Color(0f, 0f, 0f, 0f);
+            viewportRaycast.raycastTarget = true;
+
             // 3. 创建 Content（内容容器）
             GameObject content = new GameObject("Content", typeof(RectTransform));
             content.transform.SetParent(viewport.transform, false);
             var contentRect = content.GetComponent<RectTransform>();
-            contentRect.anchorMin = new Vector2(0f, 1f);
-            contentRect.anchorMax = new Vector2(1f, 1f);
-            contentRect.sizeDelta = new Vector2(0f, 300f); // 默认高度
-            contentRect.pivot = new Vector2(0.5f, 1f);
+            if (horizontal)
+            {
+                contentRect.anchorMin = new Vector2(0f, 1f);
+                contentRect.anchorMax = new Vector2(0f, 1f);
+                contentRect.sizeDelta = new Vector2(300f, 0f); // 默认宽度，运行时由 SingleScrollView 重算
+                contentRect.pivot = new Vector2(0f, 1f);
+            }
+            else
+            {
+                contentRect.anchorMin = new Vector2(0f, 1f);
+                contentRect.anchorMax = new Vector2(1f, 1f);
+                contentRect.sizeDelta = new Vector2(0f, 300f); // 默认高度
+                contentRect.pivot = new Vector2(0.5f, 1f);
+            }
 
             scrollRect.content = contentRect;
 
-            // 4. 创建 Scrollbar Vertical
-            GameObject scrollbar = new GameObject("Scrollbar Vertical", typeof(RectTransform));
-            scrollbar.transform.SetParent(go.transform, false);
-            var scrollbarRect = scrollbar.GetComponent<RectTransform>();
-            scrollbarRect.anchorMin = new Vector2(1f, 0f);
-            scrollbarRect.anchorMax = new Vector2(1f, 1f);
-            scrollbarRect.sizeDelta = new Vector2(12f, 0f);
-            scrollbarRect.pivot = new Vector2(1f, 0.5f);
-
-            var scrollbarImage = scrollbar.AddComponent<Image>();
-            scrollbarImage.color = new Color(0f, 0f, 0f, 0.25f);
-            var scrollbarComponent = scrollbar.AddComponent<Scrollbar>();
-            scrollbarComponent.direction = Scrollbar.Direction.BottomToTop;
-
-            // 5. 创建 Scrollbar/Sliding Area
-            GameObject slidingArea = new GameObject("Sliding Area", typeof(RectTransform));
-            slidingArea.transform.SetParent(scrollbar.transform, false);
-            var slidingRect = slidingArea.GetComponent<RectTransform>();
-            slidingRect.anchorMin = Vector2.zero;
-            slidingRect.anchorMax = Vector2.one;
-            slidingRect.sizeDelta = Vector2.zero;
-
-            // 6. 创建 Scrollbar/Sliding Area/Handle
-            GameObject handle = new GameObject("Handle", typeof(RectTransform));
-            handle.transform.SetParent(slidingArea.transform, false);
-            var handleRect = handle.GetComponent<RectTransform>();
-            handleRect.sizeDelta = new Vector2(12f, 12f);
-            var handleImage = handle.AddComponent<Image>();
-            handleImage.color = new Color(1f, 1f, 1f, 0.5f);
-
-            scrollbarComponent.handleRect = handleRect;
-            scrollbarComponent.targetGraphic = handleImage;
-
-            // 7. 绑定 Scrollbar 到 ScrollRect
-            scrollRect.verticalScrollbar = scrollbarComponent;
-            scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
+            // 4. 不创建 Scrollbar：项目 UI 风格没有滚动条节点，滚动完全依靠 Viewport 上的透明命中 Image 接收拖拽。
         }
 
         /// <summary>
@@ -1465,7 +1465,8 @@ namespace LRUIPrefabGen
 
         /// <summary>
         /// GridScrollView 组件的后处理钩子：创建多列网格滚动列表层级结构
-        /// 包括 LR.ScrollView（根节点）、Viewport（遮罩）、Content（GridLayoutGroup）和 Scrollbar
+        /// 包括 LR.ScrollView（根节点）、Viewport（遮罩 + 拖拽命中层）、Content。
+        /// 项目 UI 风格不使用 Scrollbar 节点，滚动完全靠拖拽。
         /// </summary>
         static void PostProcessGridScrollView(GameObject go, JObject node)
         {
@@ -1500,6 +1501,13 @@ namespace LRUIPrefabGen
             var viewportMask = viewport.AddComponent<RectMask2D>();
             scrollRect.viewport = viewportRect;
 
+            // Viewport 同时是拖拽命中面：列表项若全是 TMP（生成器默认 raycastTarget=false），
+            // 整块区域就没有任何 Graphic 能接收指针事件，ScrollRect 收不到 beginDrag/drag，
+            // 表现为“内容超出但手动拖不动”（只有滚动条能滚）。透明 Image 只负责命中。
+            var viewportRaycast = (Image)AddComponentWithRequirements(viewport, typeof(Image));
+            viewportRaycast.color = new Color(0f, 0f, 0f, 0f);
+            viewportRaycast.raycastTarget = true;
+
             // 3. 创建 Content（内容容器）
             // 不加 GridLayoutGroup：LR.ScrollView 自己算行列（OnRefreshSize 用
             // m_CellWidth/m_CellHeight 求 m_ColCount，OnGetPos 直接写 anchoredPosition），
@@ -1515,42 +1523,7 @@ namespace LRUIPrefabGen
 
             scrollRect.content = contentRect;
 
-            // 4. 创建 Scrollbar Vertical
-            GameObject scrollbar = new GameObject("Scrollbar Vertical", typeof(RectTransform));
-            scrollbar.transform.SetParent(go.transform, false);
-            var scrollbarRect = scrollbar.GetComponent<RectTransform>();
-            scrollbarRect.anchorMin = new Vector2(1f, 0f);
-            scrollbarRect.anchorMax = new Vector2(1f, 1f);
-            scrollbarRect.sizeDelta = new Vector2(12f, 0f);
-            scrollbarRect.pivot = new Vector2(1f, 0.5f);
-
-            var scrollbarImage = scrollbar.AddComponent<Image>();
-            scrollbarImage.color = new Color(0f, 0f, 0f, 0.25f);
-            var scrollbarComponent = scrollbar.AddComponent<Scrollbar>();
-            scrollbarComponent.direction = Scrollbar.Direction.BottomToTop;
-
-            // 5. 创建 Scrollbar/Sliding Area
-            GameObject slidingArea = new GameObject("Sliding Area", typeof(RectTransform));
-            slidingArea.transform.SetParent(scrollbar.transform, false);
-            var slidingRect = slidingArea.GetComponent<RectTransform>();
-            slidingRect.anchorMin = Vector2.zero;
-            slidingRect.anchorMax = Vector2.one;
-            slidingRect.sizeDelta = Vector2.zero;
-
-            // 6. 创建 Scrollbar/Sliding Area/Handle
-            GameObject handle = new GameObject("Handle", typeof(RectTransform));
-            handle.transform.SetParent(slidingArea.transform, false);
-            var handleRect = handle.GetComponent<RectTransform>();
-            handleRect.sizeDelta = new Vector2(12f, 12f);
-            var handleImage = handle.AddComponent<Image>();
-            handleImage.color = new Color(1f, 1f, 1f, 0.5f);
-
-            scrollbarComponent.handleRect = handleRect;
-            scrollbarComponent.targetGraphic = handleImage;
-
-            // 7. 绑定 Scrollbar 到 ScrollRect
-            scrollRect.verticalScrollbar = scrollbarComponent;
-            scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
+            // 4. 不创建 Scrollbar：项目 UI 风格没有滚动条节点，滚动完全依靠 Viewport 上的透明命中 Image 接收拖拽。
         }
     }
 }

@@ -59,6 +59,7 @@ STRING_ATTRS = {
     "data-layout-child-alignment": "layoutChildAlignment",
     "data-visible": "visible",
     "data-cell-template": "cellTemplate",
+    "data-scroll-direction": "scrollDirection",
 }
 
 NUMBER_SCALAR_ATTRS = {
@@ -68,6 +69,8 @@ NUMBER_SCALAR_ATTRS = {
 
 BOOL_ATTRS = {
     "data-preserve-aspect": "preserveAspect",
+    "data-layout-child-force-expand-width": "layoutChildForceExpandWidth",
+    "data-layout-child-force-expand-height": "layoutChildForceExpandHeight",
 }
 
 

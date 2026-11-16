@@ -192,6 +192,7 @@ MixGrowthFundPage.cs (BaseActivityPage):
    - 参考 Prefab 有分割线时，画 `data-component="content.divider"` + `data-role="divider"` 节点；不要省略。
 9. **具体样式覆盖只用于 `data-role`/命名变体表达不了的差异**：使用 `data-font-size`/`data-color`/`data-font`/`data-font-material`/`data-outline-color`/`data-sprite`/`data-image-type`/`data-texture`/`data-image-color`/`data-preserve-aspect` 时，必须在 `reference-notes.md` 记录理由；每个覆盖属性必须能作用于真实组件（见 [unity-layout-attributes.md](references/unity-layout-attributes.md) 的目标规则）。**字体材质只提供描边宽度，最终描边色由每个 TMP 的 `m_outlineColor` 决定**：只要 `data-font-material` 指向 `*_OutLine1Px` / `*_OutLine2` / `*_OutLine2Px`，必须同时写 `data-outline-color`；不写会渲染成材质默认的白色粗描边，字内孔糊死，步骤 5 会阻断。
 10. **`data-color` 优先作为文本颜色**；无文本目标时作为图片颜色别名，`data-name="Screen"` 的遮罩节点映射到生成的 Screen Image 颜色；图片颜色仍优先显式写 `data-image-color`。`data-text-align` 与 `data-vertical-align` 可以单独使用（单独使用时保留另一轴），同时写则两者都覆盖；`RawImage` 支持 `data-image-color` 和 `data-texture`。
+11. **滚动列表不生成 Scrollbar 节点**：项目 UI 风格没有滚动条。`grid-scroll-view` / `single-scroll-view` 后处理只创建根节点、Viewport（RectMask2D + 透明命中 Image）和 Content，滚动完全靠拖拽；TSX 里也不要画 `Scrollbar Vertical`。
 
 发现 React 原型与 C# 字段之间存在结构性矛盾时（比如脚本要三个领取按钮但原型只有一个入口），停止生成，回报使用者，不静默拍板改设计。参考 Prefab 之间、或参考与原型之间的**样式**冲突无法用命名样式解释时，不阻断：按同功能参考 > 模块档案 > 白名单默认值取舍，并把冲突和取舍写进 `reference-notes.md`。
 
@@ -437,6 +438,14 @@ python .claude/skills/lr-openspec-ui-prefab/scripts/unity_cli_wrapper.py <SE工�
 - TSX 的 `data-lr-component` 显式挂载类型：核对其声明与 SE 脚本类型是否一致。
 
 修改原始配方或生成器后重新临时部署，通过 MCP 检查编译、组件类型和序列化引用；部署副本仍以本技能源码为准。
+
+### 滚动列表内容超出但拖不动
+
+`ScrollRect` 的拖拽靠命中 Graphic 的事件冒泡。若列表项全是 TMP（生成器默认 `raycastTarget=false`），且 Viewport 上没有 Graphic，整块区域没有任何 raycastTarget，拖拽事件到不了 `ScrollRect`，表现为“能程序化滚、手动拖不动”。
+
+生成器的 `grid-scroll-view` / `single-scroll-view` 后处理会给 Viewport 补一层透明 Image（`raycastTarget=true`、alpha=0）作为拖拽命中面。旧 Prefab 遇到此问题按同样结构补齐即可；不要只给 TMP 打开 `raycastTarget`，文字外的空白区域仍然拖不动。
+
+项目 UI 风格不使用滚动条：生成器不再创建 `Scrollbar Vertical`，也不要靠滚动条兜底拖拽。
 
 ### 校验器报字段绑定缺失
 

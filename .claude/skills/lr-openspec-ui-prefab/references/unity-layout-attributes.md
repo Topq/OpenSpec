@@ -96,6 +96,9 @@
 | `data-layout-spacing` | 子项间距（数值） |
 | `data-layout-padding` | 四值 `(left, right, top, bottom)` |
 | `data-layout-child-alignment` | Unity `TextAnchor` 命名，如 `UpperLeft`、`MiddleCenter` |
+| `data-layout-child-force-expand-width` | `true`/`false`；固定宽的容器里纵向列表通常应设 `false`，否则子项会被均分排布 |
+| `data-layout-child-force-expand-height` | `true`/`false`；固定高（或高度由运行时按内容重算）的纵向列表必须设 `false`，否则行距被拉大、末行超出 Content |
+| `data-scroll-direction` | `horizontal` 生成横向 `list.single-scroll`（缺省竖向）；滚动列表不生成 Scrollbar 节点，靠拖拽滚动 |
 
 ### 节点级样式覆盖（命名变体之后）
 
