@@ -2,10 +2,10 @@
 
 ## 目标与非目标
 
-**目标**：通过 ai-game-developer MCP，在真实 Unity 中验证 UI 结构、字段绑定、状态、交互契约（C1 类型 / C2 能力 / C3 行为）、Console，并把结论写成可复验的证据。
+**目标**：通过 ai-game-developer MCP，在真实 Unity 中验证 UI 结构、字段绑定、状态、交互契约（C1 类型 / C2 能力 / C3 行为）、布局几何契约（GL1 宿主边界 / GL2 区域占比 / GL3 文本单行 / GL4 模板尺度 / GL5 图片比例）、Console，并把结论写成可复验的证据。
 
 **非目标**：
-- 不做像素级视觉验收（交人工）
+- 不做像素级美术/颜色验收（交人工）；**布局几何必须验**（GL1~GL5）
 - 不真实支付、不领取、不消耗
 - 不修工程、不改 Prefab、不改配置表
 - 不把 GM/注入打开面板等同于真实入口验证
@@ -118,14 +118,15 @@ script-execute: Debug.Log(Application.dataPath)
 
 批次开始前把清单写进报告。
 
-### 活动页入口：四级与红线
+### 入口级别：证明力与红线（活动页 / 页签入口页）
 
-活动类界面（继承 `BaseActivityPage`）不能直接 `ui-open`，必须同时提供菜单数据。按证明力从高到低选，**能高不低**：
+活动类界面（继承 `BaseActivityPage`）不能直接 `ui-open`，必须同时提供菜单数据；页签/入口类页面则有父面板链路可用。两类都按证明力从高到低选，**能高不低**；新增/修改页签或入口的 change，L1.5 是最低要求，L2/L3 不可接受：
 
 | 级别 | 入口方式 | 证明力 | 标注 |
 |---|---|---|---|
-| L0 真实入口 | 点击主界面活动图标进入 | 最强，覆盖入口链路 | `entry=real` |
+| L0 真实入口 | 点击主界面入口（活动图标 / 冒险按钮）进入 | 最强，覆盖入口链路 | `entry=real` |
 | L1 GM / 配置 | `game-execute-gm-command` 打开活动界面 | 中 | `entry=gm` |
+| L1.5 父面板链路 | 父入口面板真实卡片/入口 handler → 父面板页签 → 点目标页签 | 强，覆盖入口配置与页签过滤 | `entry=parent_chain_click` |
 | L2 合成菜单数据 | 反射设 `m_MenuData`，再调 `OpenPageUI(...)` + 面板刷新入口 | 弱，只证明页面渲染与交互 | `entry=synthetic_setactivity` |
 | L3 直接注入 | `ui-open` 强开 | 最弱 | `entry=injected_ui_open` |
 
@@ -140,8 +141,21 @@ script-execute: Debug.Log(Application.dataPath)
 
 报告里必须写 `entry` 与 `entry_verified`：
 
-- `entry_verified=true` 仅当走 L0 或 L1 且确实点/发成功
+- `entry_verified=true` 仅当走 L0 / L1 / L1.5 且确实点/发成功
 - L2 / L3 一律 `entry_verified=false`，并把“真实入口未验证”写进人工清单
+
+### 页签 / 入口类 change：父面板链路（必做）
+
+目标页能 `ui-open`，只证明页面自己渲染得出来；它绕过父面板的页签过滤。新增/修改页签、入口卡片的 change 必须走真实链路：
+
+1. **E1 配置断言**：`TDFuncTable.GetData(funcID).isOpen == true`，且 `GameFuncModule.IsOpenOnlyCheckCondition(funcID) == true`。任一为 false → `interaction_unavailable`（config），页签不会出现。
+2. **E2 父面板**：调父入口面板的真实 handler（如 `AdventureBlendEntryPanel` 的卡片 `OnClickEntry`），让父面板按正常逻辑生成页签；断言页签列表包含目标 funcID，并记录 `leftTabs`。
+3. **E3 点击页签**：用真实点击配方点目标页签；断言目标页面 active、当前页状态切换、旧页 inactive。
+4. 采证：`leftTabs`、点击后页面、截图、Console。
+
+入口级别记 `entry=parent_chain_click` / `entry_verified=true`。只做了 `ui-open` 的，`entry=injected_ui_open` / `entry_verified=false`；对入口类 change 直接 `not_passed`（G6）。
+
+为什么不能只看目标页：`AdventureBlendMainPanel.RefreshList()` 这类父面板会按 `IsOpenOnlyCheckCondition` 过滤页签，判断发生在打开目标页之前，注入方式永远走不到。team-challenge 的 D-08 就是这样漏掉的。
 
 ---
 
@@ -153,9 +167,10 @@ script-execute: Debug.Log(Application.dataPath)
       标记日志 [LR-VERIFY][panel=X][phase=open]
       → 打开（按 G5 入口级别，优先真实/GM）
       → 有界等待稳定（面板 active、loading 消失）
-      → mock（按需，见 mock-data-shim.md）
+      → mock（空数据页面必做，见 mock-data-shim.md「空内容页面」；其余按需）
       → 采证（结构 / 绑定 / 状态 / 视觉）
       → 4a 配置断言（C1 + C2）
+      → 4c 布局几何对照（GL1~GL5，默认态，生成/修改过 Prefab 的面板必做）
       → 4b 实际交互（C3，仅 safe 项）
       → 清理 mock
       → 关闭（CloseButton 优先；AbstractPanel.CloseSelf 兜底）
@@ -165,6 +180,8 @@ script-execute: Debug.Log(Application.dataPath)
 ```
 
 **4a / 4b 必须分开记录**：4a 只读，任意面板都能做；4b 会被安全分级和工具能力卡住。只做 4a 的面板判 `runtime_config_only`，不能与做了 4b 的面板混为一谈。
+
+**4c 是只读测量**：不操作 UI 状态，在 4a/4b 之后、关闭面板之前执行；数据为空时先垫数再跑 4c（见 `mock-data-shim.md`）。
 
 **失败隔离**：
 
@@ -201,7 +218,7 @@ assets-prefab-open → gameobject-find(path/name) → assets-prefab-close(save=f
 
 ---
 
-## 采证六类
+## 采证七类
 
 ### 1. 结构
 
@@ -248,6 +265,8 @@ bool ok = expectedType.IsInstanceOfType(actual) || (go != null && go.GetComponen
 | 动态列表（SE ScrollView） | `totalCount` | 断言条数，**不要数子节点**（分帧创建，第一次读偏少） |
 | 动态列表（ScrollRect 模板） | 模板 inactive、实例数 | 实例数 = 数据条数 |
 | 遮罩 / 射线 | `GraphicRaycaster`、`CanvasGroup.blocksRaycasts` | 缺 GraphicRaycaster → 整面板点不到 |
+| 入口 / 页签 func | `TDFuncTable.GetData(funcID).isOpen`、`GameFuncModule.IsOpenOnlyCheckCondition(funcID)` | 必须为 `true`；false 时父面板会过滤掉入口，属配置缺陷 |
+| 列表 / 页签 / 容器 | 同一父节点下 active 子项的世界矩形 | 兄弟项不相交（容差 1px）；排除 `ShellDebugInfo` 等调试浮层 |
 
 **注意**：`GetPersistentEventCount()==0` 不代表没监听；运行时 `AddListener` 添加的监听不计入持久事件。
 
@@ -265,6 +284,7 @@ MCP 没有点击工具，用 `script-execute`。**必须走 UI 事件链**，禁
 | 切页 | 点击目标 Toggle | 目标页 active、旧页 inactive、组内唯一 |
 | 展开/收起 | 点击表头/按钮 | 区域 active 翻转 |
 | 关闭 | 点击 CloseButton | 面板从 `ui-list-opened-panels` 消失 |
+| 入口链路 | 父面板真实卡片 → 目标页签 → 目标页 | 页签列表含 funcID；目标页 active |
 
 配方与判据详见 `interaction-contract.md` 第八、十一节。
 
@@ -272,10 +292,75 @@ MCP 没有点击工具，用 `script-execute`。**必须走 UI 事件链**，禁
 
 **覆盖率**：每个面板记录 `safe_c3_done / safe_total`、`unsafe_total`、`critical_done`。缺 critical（滚动/切换/安全按钮/关闭）一律不得 passed。
 
-### 6. 视觉
+### 6. 4c 布局几何对照（GL1~GL5）
 
+生成/修改过 Prefab 的面板必做。**执行时机：mock 垫数后、状态改变型 4b 之前，量默认态**；若在 4b 之后补测，必须先恢复默认页签与滚动位置，再 `Canvas.ForceUpdateCanvases()` / `LayoutRebuilder.ForceRebuildLayoutImmediate` 后读 Rect，否则记 `inconclusive`。目标是证明「页面在宿主里的位置和占比与 demo 一致」，不是看截图顺眼。通用推导、容差、四类页面适配见 `layout-geometry.md`；本节只写执行配方。
+
+**① 分辨率准备（G7）**
+
+- 把 Game View 切到设计分辨率 `Full HD (1920x1080)`。按 `displayText` 查找，不硬编码索引：
+
+```csharp
+const BindingFlags F = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+var gvType = Type.GetType("UnityEditor.GameView, UnityEditor");
+var gv = EditorWindow.GetWindow(gvType);
+var selProp = gvType.GetProperty("selectedSizeIndex", F);
+int before = (int)selProp.GetValue(gv);
+// 用 GameViewSizes.instance.currentGroup 的 GetTotalCount() / GetGameViewSize(i)
+// 找到 displayText 含 "1920x1080" 且 sizeType = FixedResolution 的索引
+selProp.SetValue(gv, targetIndex);
+```
+
+- 记录 `view_size_before` / `view_resolution` / `view_aspect`；批次结束恢复到 `view_size_before`。
+- 找不到 1920×1080 时，退到 16:9 Aspect 且 ≥1280×720；此时 y 轴只做包含/相交，布局结论 `inconclusive`，不能 `passed`。
+
+**② 基准与实测**
+
+- 从 demo 取一级区域（CSS 选择器 + 值），按 `layout-geometry.md` 分类 fixed / percentage / flex / replaced_by_host / unknown，写成期望表。
+- 实测用 `script-execute` 取 RectTransform 四角，转根 Canvas 局部：
+
+```csharp
+var rt = go.GetComponent<RectTransform>();
+var canvasRt = rt.GetComponentInParent<Canvas>().rootCanvas.GetComponent<RectTransform>();
+var corners = new Vector3[4]; rt.GetWorldCorners(corners);
+float xMin = float.MaxValue, xMax = float.MinValue, yMin = float.MaxValue, yMax = float.MinValue;
+foreach (var c in corners) {
+    var l = canvasRt.InverseTransformPoint(c);
+    xMin = Mathf.Min(xMin, l.x); xMax = Mathf.Max(xMax, l.x);
+    yMin = Mathf.Min(yMin, l.y); yMax = Mathf.Max(yMax, l.y);
+}
+// canvas 坐标 = local + canvasRt.rect.size / 2
+```
+
+- 记录 `canvas_size`。1920×1080 时 x/y 都可对照；非设计分辨率时 x/width 对照，y 只做包含/相交。
+- 不要用 `WorldToScreenPoint(null, ...)` 或直接读 `anchoredPosition`：页面挂在宿主多层节点下，局部坐标不是 canvas 坐标。
+
+**③ 五项检查**
+
+按 `layout-geometry.md` 第 4 节执行 GL1~GL5。只查一级容器（列表/立绘/详情/底栏等）和 demo 明确约束的文本，控制在 5~10 个矩形；同一父节点兄弟相交仍在 4a 做。GL1 不含全屏 `Bg`、`WindowBg`、`Screen` 遮罩、dimmer、滚动条和装饰层。
+
+**④ 截图**
+
+- 1920×1080、`debugpage 0`；先 `ui-list-opened-panels` 确认无无关面板。
+- 与 demo 同尺寸并排留证；降级环境下记录实际 `view_resolution`，截图只作参考。
+
+**⑤ 判定与豁免**
+
+- 按 `layout-geometry.md` 的严重度：GL1/GL2/GL3/GL5 失败，或 GL4 溢出/重叠/裁切 → `runtime_failed_related` + `visual_layout_mismatch`；GL4 纯高度/尺度差 P2。
+- `waived` 必须用户确认并写理由；fixed 被豁免后 flex 期望重算。
+- 期望表缺失或分辨率不达标（G7）→ 布局项 `inconclusive`。
+
+### 7. 视觉
+
+- **分辨率门禁**：先按 G7 把 Game View 切到设计分辨率 1920×1080，并在报告记录 `view_resolution` / `view_aspect` / `canvas_size`；无法切换时至少 ≥1280×720 并记录降级
+- **先关闭调试浮层**：GM `debugpage 0`，或 `GameObject.Find("UIRoot/RootCanvas/PanelRoot/ShellDebugInfo(Clone)").SetActive(false)`。该浮层是 `LaunchShellModule` 的 FPS/OC/ME/MDC 面板，默认停在左上角，会压在左侧页签/列表上；看起来像文字重叠时先排除它
+- **核对面板基线**：截图前用 `ui-list-opened-panels` 确认没有无关面板仍在打开；目标面板背景半透明时，底层页面的白块/文字会透出来，被误判为重叠或缺失（team-challenge 实测底层 `TaskTeamPage` 透出白色块）
+- **布局相交检查**：对列表/页签/容器取同一父节点下 active 子项的 `RectTransform` 四角画矩形，两两求交；相交面积 > 1px² 记为 `interaction_behavior_mismatch`，证据写两个矩形。文字行高与行距正常但截图仍“叠字”，优先怀疑调试浮层/分辨率伪影，不要直接判 prefab 缺陷
+- `Screen.SetResolution` 不改变 Editor Game View；需要放大时用反射 `EditorWindow.GetWindow(Type.GetType("UnityEditor.GameView, UnityEditor")).maximized = true`
+- 低分辨率下中文可能整体渲染成方块，这是采样伪影，不是字体/材质缺陷；未过分辨率门禁前不得报视觉缺陷
 - `screenshot-game-view` 作为证据附在报告
 - 只做**角色一致性**检查（标题/按钮/价格用了对的样式角色）
+- 本节只覆盖颜色/美术资源；布局几何（边界/占比/单行/尺度/图片比例）由 4c 负责，**不要用 `runtime_visual_review_needed` 兜底布局**
 - 像素级差异交人工，标 `runtime_visual_review_needed`
 
 ---
@@ -301,7 +386,7 @@ Console/反射输出经常超 token：必须用 `logTypeFilter` + `lastMinutes` 
 |---|---|
 | `runtime_passed` | 门禁通过 + C1/C2/C3 全覆盖 safe 项 + critical 全做 + Console 无 related/unknown |
 | `runtime_passed_mock` | 同上，数据来自 mock |
-| `runtime_failed_related` | 发现本功能问题（含 `component_type_mismatch` / `interaction_behavior_mismatch` / `unreachable_interaction`） |
+| `runtime_failed_related` | 发现本功能问题（含 `component_type_mismatch` / `interaction_behavior_mismatch` / `unreachable_interaction` / `visual_layout_mismatch`） |
 | `runtime_partial_unsafe` | 其余全过，但存在 unsafe 交互无法执行 |
 | `runtime_interaction_incomplete` | safe 项未做 C3，或 critical 有缺 |
 | `runtime_config_only` | 只做了 C1/C2，未做 C3 |
@@ -323,7 +408,7 @@ skipped > blocked_tooling > blocked_precondition > failed_related
 
 | 面板判定 | change 级 |
 |---|---|
-| 全部 `runtime_passed` / `runtime_passed_mock` / `runtime_visual_review_needed` | `passed`（视觉项进人工清单） |
+| 全部 `runtime_passed` / `runtime_passed_mock` / `runtime_visual_review_needed` | `passed`（`visual_review_needed` 仅限颜色/美术资源；布局几何不能落在这里） |
 | 任一 `runtime_failed_related` | `not_passed` |
 | 任一 `runtime_interaction_incomplete` / `runtime_partial_unsafe` / `runtime_inconclusive` / `runtime_config_only` | `not_passed`（写清未覆盖范围） |
 | 全部 `blocked_*` / `skipped` | `blocked` |
@@ -351,3 +436,12 @@ skipped > blocked_tooling > blocked_precondition > failed_related
 | **`GetPersistentEventCount()==0` 被当成无监听/安全** | 运行时 `AddListener` 不计入；安全分级必须追 handler |
 | **`SetActivity(...)` 注入活动页** | 会 `RecordRedPoint` 写本地存档；改为反射设 `m_MenuData` + `OpenPageUI` |
 | **`content.size > viewport.size` 当绝对断言** | 数据不足时滚不动是正确行为；改为条件断言 |
+| **`ui-open` 绕过父面板页签过滤** | 入口类 change 必须走父面板链路；先断言 func `isOpen` |
+| **`Screen.SetResolution` 不改变 Editor Game View** | 切尺寸用 `Full HD (1920x1080)` 预设（`selectedSizeIndex`）；`GameView.maximized=true` 只用于临时放大 |
+| **低分辨率下中文像方块** | 339×212 等小窗口的采样伪影；放大到 ≥1280×720 再判视觉 |
+| **`ShellDebugInfo` 调试浮层压在左侧列表/页签上** | 视觉截图前 GM `debugpage 0` 关闭；`debugpage 1/2/3` 重新打开。浮层是 `FPS/OC/ME/MDC` 文本，不是 UI 布局 |
+| **页面挂在宿主面板下时按 `anchoredPosition` 判位置** | 多层父节点偏移，局部坐标不等于 canvas 坐标；用世界角点转根 Canvas 局部 |
+| **没有切到 1920×1080 就判比例** | 用 Game View 的 `Full HD (1920x1080)` 预设；记录并恢复原尺寸；无法切换时按 G7 降级 |
+| **收窄容器后不回归单行文本** | 断言 `TMP.textInfo.lineCount == 1`；副标题从 175 宽加到 360 才恢复单行 |
+| **贴图宽高比与显示区不一致** | RawImage 全图 uv 会拉伸；按 demo 的 cover/slice 做 uvRect 居中裁切，或 contain 用 preserveAspect。只比较 preserveAspect 会漏掉 RawImage |
+| **Game View 尺寸改变后不恢复** | 记录 `selectedSizeIndex` 的切换前值，批次结束恢复；否则影响后续人工验收 |

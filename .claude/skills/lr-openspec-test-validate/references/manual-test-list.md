@@ -2,12 +2,14 @@
 
 ## 来源
 
-收四类：
+收六类：
 
 - **2b**：静态和运行时的能力边界之外（真实支付、多设备、像素级视觉）
 - **3**：需要服务端/真实数据/跨端
 - **unsafe 交互**：规则禁止自动执行（购买、领取、消耗、写存档）
-- **entry_unverified**：只靠 L2/L3 注入打开的面板，真实入口未验证
+- **entry_unverified**：只靠 L2/L3 注入打开的面板，真实入口未验证（**仅限 `touches_entry=false` 的 change**；入口/页签类 change 是阻断项，进缺陷清单，不进人工清单）
+- **empty_data_unverified**：页面因数据缺失为空、且垫不出合法测试数据，有数据态未验（空态验过也要单列）
+- **layout_unknown**：demo 布局不确定（calc / 百分比 / min-max / 媒体查询），4c 标 `expected_unknown`，需人工按设计稿确认
 
 **2a-struct / 2a-interact 里已经验证过的条目必须从清单中扣除**，并在清单开头写明扣除了多少项、为什么。
 
@@ -59,6 +61,31 @@
 - 单列一组，写明 `entry=synthetic_setactivity` / `injected_ui_open`
 - 步骤从**主界面入口**开始，覆盖入口可见性、点击后的加载、活动未开启/已结束的显示
 - **不能**因为面板内部验过就从清单扣除
+- 若 `touches_entry=true`（新增/修改页签或入口），**不要写进本清单**：G6 已判 `not_passed`，按阻断项记录，修复后必须重走父面板链路
+
+---
+
+## empty_data_unverified 怎么写
+
+本次页面打开时因配置表/玩家数据/功能未开放而内容为空，且无法垫出合法数据时：
+
+- 写明空的原因（`config_empty` / `player_data_empty` / `feature_locked`）和为什么垫不出（三个前提哪条不满足）
+- 步骤：准备合法数据（导表 / 测试账号 / GM 造数）→ 重开页面 → 检查有数据态的展示、交互与布局
+- 若只能验空态：写明空态文案与布局正常，并明确「有数据态未覆盖」
+- 类型：`empty_data_unverified`，报告写 `empty_state=blocked`
+
+不要用空态截图替代有数据态验收。
+
+---
+
+## layout_unknown 怎么写
+
+4c 发现 demo 的期望值无法确定性推导时（`expected_unknown`）：
+
+- 写明哪个区域不确定、为什么（`calc()` / 百分比 / `min-width` / `max-width` / 媒体查询 / 设计稿缺值）
+- 步骤：对照设计稿或策划确认期望边界 → 在 1920×1080 下量实际 → 记录偏差
+- 类型：`layout_unknown`，报告写 `layout_baseline=partial`
+- 不要把 `expected_unknown` 写成 passed；确认后再按 GL2 判定
 
 ---
 
